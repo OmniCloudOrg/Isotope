@@ -109,7 +109,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- Create an [Issue](https://github.com/yourusername/isotope/issues)
+- Create an [Issue](https://github.com/OmniCloudOrg/Isotope/issues)
 
 ---
 
