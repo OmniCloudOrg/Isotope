@@ -1,0 +1,316 @@
+{
+  "project": {
+    "name": "windows11-developer",
+    "version": "1.0.0",
+    "description": "Windows 11 with developer tools pre-installed"
+  },
+  "source": {
+    "type": "iso",
+    "path": "./Win11_Pro.iso",
+    "checksum": {
+      "type": "sha256",
+      "value": "8c31fd4c4523f1404450758d51f8780cb5faeedcaa4fdeab8e1d6808f5d51c62"
+    }
+  },
+  "output": {
+    "path": "./output/win11-dev.iso",
+    "format": "iso9660",
+    "options": {
+      "bootable": true
+    }
+  },
+  "modifications": [
+    {
+      "type": "answer_file",
+      "template": "./templates/autounattend.xml",
+      "destination": "/autounattend.xml",
+      "variables": {
+        "COMPUTERNAME": "DEVSTATION",
+        "USERNAME": "developer",
+        "ORGNAME": "Development",
+        "TIMEZONE": "Pacific Standard Time"
+      }
+    },
+    {
+      "type": "directory_add",
+      "source": "./scripts/setup",
+      "destination": "/setup"
+    }
+  ],
+  "build": {
+    "commands": [
+      "mkdir -p /mnt/win-iso",
+      "mount -o loop Win11_Pro.iso /mnt/win-iso",
+      "mkdir -p /tmp/new-iso",
+      "cp -rT /mnt/win-iso /tmp/new-iso",
+      "chmod +w -R /tmp/new-iso",
+      "cp ./templates/autounattend.xml /tmp/new-iso/autounattend.xml",
+      "cp -r ./scripts/setup /tmp/new-iso/setup",
+      "umount /mnt/win-iso",
+      "mkisofs -udf -boot-info-table -b boot/etfsboot.com -no-emul-boot -o win11-dev.iso /tmp/new-iso"
+    ]
+  },
+  "test": {
+    "vm": {
+      "provider": "virtualbox",
+      "memory": "4G",
+      "cpus": 4,
+      "options": [
+        "--vram", "128",
+        "--cpus", "4",
+        "--memory", "4096"
+      ]
+    },
+    "boot_wait": "10s",
+    "shutdown_command": "shutdown /s /t 0",
+    "winrm": {
+      "username": "developer",
+      "password": "{{ env.WIN_PASSWORD }}",
+      "timeout": "2h"
+    },
+    "provision": [
+      {
+        "type": "powershell",
+        "script": "./scripts/install-dev-tools.ps1"
+      },
+      {
+        "type": "powershell",
+        "inline": [
+          "choco install -y git vscode nodejs-lts docker-desktop",
+          "Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -NoRestart"
+        ]
+      }
+    ]
+  },
+  "gui_installation": {
+    "enabled": true,
+    "interactive_installation": [
+      {
+        "description": "Windows initial boot",
+        "detection": {
+          "wait_for_timeout": "60s"
+        },
+        "keypress_sequence": []
+      },
+      {
+        "description": "Language selection screen",
+        "detection": {
+          "wait_for_timeout": "60s"
+        },
+        "keypress_sequence": [
+          {"key": "enter", "description": "Accept default language"}
+        ]
+      },
+      {
+        "description": "Install Now screen",
+        "detection": {
+          "wait_for_timeout": "30s"
+        },
+        "keypress_sequence": [
+          {"key": "enter", "description": "Begin installation"}
+        ]
+      },
+      {
+        "description": "License Agreement",
+        "detection": {
+          "wait_for_timeout": "30s"
+        },
+        "keypress_sequence": [
+          {"key": "tab", "description": "Navigate to checkbox"},
+          {"key": "space", "description": "Accept license"},
+          {"key": "tab", "description": "Navigate to Next"},
+          {"key": "enter", "description": "Click Next"}
+        ]
+      },
+      {
+        "description": "Installation Type",
+        "detection": {
+          "wait_for_timeout": "5s"
+        },
+        "keypress_sequence": [
+          {"key": "tab", "description": "Highlight 'Custom' option"},
+          {"key": "enter", "description": "Select Custom install"}
+        ]
+      },
+      {
+        "description": "Disk selection",
+        "detection": {
+          "wait_for_timeout": "10s"
+        },
+        "keypress_sequence": [
+          {"key": "enter", "description": "Select first disk"}
+        ]
+      },
+      {
+        "description": "Installing Windows",
+        "detection": {
+          "wait_for_timeout": "30m",
+          "success_pattern": "Getting ready"
+        },
+        "keypress_sequence": []
+      },
+      {
+        "description": "OOBE - Region",
+        "detection": {
+          "wait_for_timeout": "5m"
+        },
+        "keypress_sequence": [
+          {"key": "tab", "description": "Navigate to Next/Yes button"},
+          {"key": "enter", "description": "Select United States"}
+        ]
+      },
+      {
+        "description": "OOBE - Keyboard",
+        "detection": {
+          "wait_for_timeout": "10s"
+        },
+        "keypress_sequence": [
+          {"key": "tab", "description": "Navigate to Yes button"},
+          {"key": "enter", "description": "Select US keyboard"}
+        ]
+      },
+      {
+        "description": "OOBE - Second keyboard",
+        "detection": {
+          "wait_for_timeout": "5s"
+        },
+        "keypress_sequence": [
+          {"key": "tab", "description": "Navigate to Skip button"},
+          {"key": "enter", "description": "Skip second keyboard"}
+        ]
+      },
+      {
+        "description": "OOBE - Network",
+        "detection": {
+          "wait_for_timeout": "15s"
+        },
+        "keypress_sequence": [
+          {"key": "tab", "description": "Navigate to Yes button"},
+          {"key": "enter", "description": "Connect to network"}
+        ]
+      },
+      {
+        "description": "OOBE - Setup for personal use",
+        "detection": {
+          "wait_for_timeout": "10s"
+        },
+        "keypress_sequence": [
+          {"key": "tab", "description": "Navigate to Personal use option"},
+          {"key": "enter", "description": "Select personal account"}
+        ]
+      },
+      {
+        "description": "OOBE - Microsoft account",
+        "detection": {
+          "wait_for_timeout": "10s"
+        },
+        "keypress_sequence": [
+          {"key": "tab", "repeat": 3, "description": "Navigate to 'Offline account' link"},
+          {"key": "enter", "description": "Select offline account"}
+        ]
+      },
+      {
+        "description": "OOBE - Sign-in options",
+        "detection": {
+          "wait_for_timeout": "5s"
+        },
+        "keypress_sequence": [
+          {"key": "tab", "repeat": 3, "description": "Navigate to 'Limited experience' link"},
+          {"key": "enter", "description": "Select limited experience (local account)"}
+        ]
+      },
+      {
+        "description": "OOBE - Who's going to use this device",
+        "detection": {
+          "wait_for_timeout": "5s"
+        },
+        "keypress_sequence": [
+          {"key_text": "Developer", "description": "Enter username"},
+          {"key": "tab", "description": "Navigate to Next button"},
+          {"key": "enter", "description": "Continue"}
+        ]
+      },
+      {
+        "description": "OOBE - Create password",
+        "detection": {
+          "wait_for_timeout": "5s"
+        },
+        "keypress_sequence": [
+          {"key_text": "{{ env.WIN_PASSWORD }}", "description": "Enter password"},
+          {"key": "tab", "description": "Navigate to Next"},
+          {"key": "enter", "description": "Continue"}
+        ]
+      },
+      {
+        "description": "OOBE - Confirm password",
+        "detection": {
+          "wait_for_timeout": "3s"
+        },
+        "keypress_sequence": [
+          {"key_text": "{{ env.WIN_PASSWORD }}", "description": "Enter password again"},
+          {"key": "tab", "description": "Navigate to Next"},
+          {"key": "enter", "description": "Continue"}
+        ]
+      },
+      {
+        "description": "OOBE - Security questions",
+        "detection": {
+          "wait_for_timeout": "3s"
+        },
+        "keypress_sequence": [
+          {"key": "down", "description": "Select security question 1"},
+          {"key": "tab", "description": "Navigate to answer field"},
+          {"key_text": "Answer1", "description": "Enter answer 1"},
+          {"key": "tab", "description": "Navigate to question 2"},
+          {"key": "down", "description": "Select security question 2"},
+          {"key": "tab", "description": "Navigate to answer field"},
+          {"key_text": "Answer2", "description": "Enter answer 2"},
+          {"key": "tab", "description": "Navigate to question 3"},
+          {"key": "down", "description": "Select security question 3"},
+          {"key": "tab", "description": "Navigate to answer field"},
+          {"key_text": "Answer3", "description": "Enter answer 3"},
+          {"key": "tab", "description": "Navigate to Next"},
+          {"key": "enter", "description": "Continue"}
+        ]
+      },
+      {
+        "description": "OOBE - Privacy settings",
+        "detection": {
+          "wait_for_timeout": "10s"
+        },
+        "keypress_sequence": [
+          {"key": "tab", "repeat": 6, "description": "Navigate to Accept button"},
+          {"key": "enter", "description": "Accept privacy settings"}
+        ]
+      },
+      {
+        "description": "OOBE - Almost done",
+        "detection": {
+          "wait_for_timeout": "5m",
+          "success_pattern": "Hi"
+        },
+        "keypress_sequence": []
+      },
+      {
+        "description": "Run custom installation script",
+        "detection": {
+          "wait_for_desktop": true,
+          "wait_for_timeout": "3m"
+        },
+        "keypress_sequence": [
+          {"key": "win+r", "description": "Open Run dialog"},
+          {"wait": "1s"},
+          {"key_text": "cmd.exe", "description": "Enter command prompt"},
+          {"key": "enter", "description": "Launch command prompt"},
+          {"wait": "2s"},
+          {"key_text": "cd C:\\setup", "description": "Navigate to setup directory"},
+          {"key": "enter", "description": "Execute command"},
+          {"wait": "1s"},
+          {"key_text": "install.bat", "description": "Run installer batch file"},
+          {"key": "enter", "description": "Execute batch file"},
+          {"wait": "10m", "description": "Wait for installation to complete"}
+        ]
+      }
+    ]
+  }
+}
