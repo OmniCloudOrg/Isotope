@@ -110,6 +110,11 @@ impl IsoBuilder {
         
         info!("Extracting source ISO: {}", self.config.source.path.display());
         
+        if !self.config.source.path.exists() {
+            return Err(anyhow::anyhow!("Source ISO file does not exist: {}", 
+                self.config.source.path.display()));
+        }
+
         // Verify the source ISO checksum
         if let Some(checksum) = &self.config.source.checksum {
             verify_checksum(&self.config.source.path, &checksum.checksum_type, &checksum.value)
