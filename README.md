@@ -114,5 +114,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 <div align="center">
-  <sub>Built with ❤️ by the ISOtope Team</sub>
+  <sub>Built with ❤️ by the OmniCloud Community</sub>
 </div>
