@@ -79,15 +79,6 @@ At OmniCloud, we use ISOtope internally for automating Live VM ISO creation to s
 - Maintain version control of our deployment configurations
 - Automate testing of new releases before deployment
 
-## 📘 Documentation
-
-For complete documentation, visit [isotope.docs.example.com](https://isotope.docs.example.com)
-
-- [Configuration Reference](https://isotope.docs.example.com/config)
-- [CLI Commands](https://isotope.docs.example.com/cli)
-- [Automation Guide](https://isotope.docs.example.com/automation)
-- [Examples](https://isotope.docs.example.com/examples)
-
 ## 🏗️ Building from Source
 
 ```bash
