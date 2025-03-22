@@ -1,8 +1,8 @@
-# ISOtope
-
 <div align="center">
 
-![ISOtope Logo](https://via.placeholder.com/200x200.png?text=ISOtope)
+<p>
+  <img src="./brand/logo-no-background.png" alt="ISOtope Logo" width="250" height="auto"/>
+</p>
 
 **A flexible, OS-agnostic ISO builder for automated deployments**
 
