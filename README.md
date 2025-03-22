@@ -119,8 +119,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 📞 Support
 
 - Create an [Issue](https://github.com/yourusername/isotope/issues)
-- Join our [Discord community](https://discord.gg/isotope)
-- Email us at support@isotope.example.com
 
 ---
 
