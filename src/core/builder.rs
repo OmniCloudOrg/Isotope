@@ -1,261 +1,276 @@
 use anyhow::{Context, Result};
-use log::{debug, info, warn};
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use tempfile::TempDir;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tracing::{error, info, warn, debug};
 
-use crate::config::schema::{Config, Modification};
-use crate::core::modifier::IsoModifier;
-use crate::iso::{extract, package};
-use crate::utils::checksum::verify_checksum;
-use crate::utils::fs::copy_directory;
-use crate::utils::template::process_templates;
+use crate::automation::{puppet::PuppetManager, vm::VmManager};
+use crate::config::{IsotopeSpec, StageType};
+use crate::iso::{extractor::IsoExtractor, packager::IsoPackager};
+use crate::utils::{checksum::ChecksumVerifier, fs::FileSystemManager};
 
-/// Responsible for the ISO building process
-pub struct IsoBuilder {
-    config: Config,
-    work_dir: Option<PathBuf>,
-    temp_dir: Option<TempDir>,
+pub struct Builder {
+    spec: IsotopeSpec,
+    working_dir: PathBuf,
+    output_path: Option<PathBuf>,
+    vm_manager: Arc<Mutex<VmManager>>,
+    puppet_manager: Arc<Mutex<PuppetManager>>,
+    iso_extractor: IsoExtractor,
+    iso_packager: IsoPackager,
+    fs_manager: FileSystemManager,
+    checksum_verifier: ChecksumVerifier,
 }
 
-impl IsoBuilder {
-    /// Create a new ISO builder with the given configuration
-    pub fn new(config: Config) -> Self {
+impl Builder {
+    pub fn new(spec: IsotopeSpec) -> Self {
+        let working_dir = std::env::temp_dir().join(format!("isotope-{}", uuid::Uuid::new_v4()));
+        
         Self {
-            config,
-            work_dir: None,
-            temp_dir: None,
+            spec,
+            working_dir: working_dir.clone(),
+            output_path: None,
+            vm_manager: Arc::new(Mutex::new(VmManager::new())),
+            puppet_manager: Arc::new(Mutex::new(PuppetManager::new())),
+            iso_extractor: IsoExtractor::new(),
+            iso_packager: IsoPackager::new(),
+            fs_manager: FileSystemManager::new(working_dir),
+            checksum_verifier: ChecksumVerifier::new(),
         }
     }
-    
-    /// Execute the build process
-    pub fn build(&mut self) -> Result<()> {
+
+    pub fn set_output_path(&mut self, path: PathBuf) {
+        self.output_path = Some(path);
+    }
+
+    pub async fn build(&self) -> Result<()> {
         info!("Starting ISO build process");
         
-        // Initialize working directory
-        self.setup_working_directory()
-            .context("Failed to set up working directory")?;
-        
-        // Run pre-extraction hooks
-        self.run_hooks("pre_extraction")
-            .context("Failed to run pre-extraction hooks")?;
-        
-        // Extract the source ISO
-        let extraction_dir = self.extract_source_iso()
-            .context("Failed to extract source ISO")?;
-        
-        // Run post-extraction hooks
-        self.run_hooks("post_extraction")
-            .context("Failed to run post-extraction hooks")?;
-        
-        // Run pre-modification hooks
-        self.run_hooks("pre_modification")
-            .context("Failed to run pre-modification hooks")?;
-        
-        // Apply modifications
-        self.apply_modifications(&extraction_dir)
-            .context("Failed to apply modifications")?;
-        
-        // Run post-modification hooks
-        self.run_hooks("post_modification")
-            .context("Failed to run post-modification hooks")?;
-        
-        // Run pre-packaging hooks
-        self.run_hooks("pre_packaging")
-            .context("Failed to run pre-packaging hooks")?;
-        
-        // Package the modified ISO
-        self.package_iso(&extraction_dir)
-            .context("Failed to package ISO")?;
-        
-        // Run post-packaging hooks
-        self.run_hooks("post_packaging")
-            .context("Failed to run post-packaging hooks")?;
-        
-        // Clean up temporary files
-        self.cleanup()
-            .context("Failed to clean up temporary files")?;
-        
+        // Create working directory
+        self.fs_manager.create_working_directory()
+            .context("Failed to create working directory")?;
+
+        // Step 1: Validate and prepare source ISO
+        let source_iso_path = self.prepare_source_iso().await?;
+
+        // Step 2: Execute init stage (VM setup)
+        self.execute_init_stage().await?;
+
+        // Step 3: Execute os_install stage (automated installation in VM)
+        self.execute_os_install_stage(&source_iso_path).await?;
+
+        // Step 4: Execute os_configure stage (live OS configuration)
+        self.execute_os_configure_stage().await?;
+
+        // Step 5: Execute pack stage (create final ISO)
+        self.execute_pack_stage().await?;
+
+        // Cleanup
+        self.cleanup().await?;
+
         info!("ISO build completed successfully");
         Ok(())
     }
-    
-    /// Set up the working directory
-    fn setup_working_directory(&mut self) -> Result<()> {
-        if let Some(work_dir) = &self.config.build.working_dir {
-            debug!("Using specified working directory: {}", work_dir.display());
-            std::fs::create_dir_all(work_dir)
-                .context("Failed to create working directory")?;
-            self.work_dir = Some(work_dir.clone());
-        } else {
-            debug!("Creating temporary working directory");
-            let temp_dir = TempDir::new()
-                .context("Failed to create temporary directory")?;
-            debug!("Temporary working directory: {}", temp_dir.path().display());
-            self.work_dir = Some(temp_dir.path().to_path_buf());
-            self.temp_dir = Some(temp_dir);
-        }
+
+    pub async fn test(&self) -> Result<()> {
+        info!("Starting ISO test process");
         
+        // Create working directory
+        self.fs_manager.create_working_directory()
+            .context("Failed to create working directory")?;
+
+        // Prepare source ISO
+        let source_iso_path = self.prepare_source_iso().await?;
+
+        // Execute init stage only
+        self.execute_init_stage().await?;
+
+        // Test the VM boot process
+        self.test_vm_boot(&source_iso_path).await?;
+
+        // Cleanup
+        self.cleanup().await?;
+
+        info!("ISO test completed successfully");
         Ok(())
     }
-    
-    /// Extract the source ISO
-    fn extract_source_iso(&self) -> Result<PathBuf> {
-        let work_dir = self.work_dir.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Working directory not initialized"))?;
+
+    async fn prepare_source_iso(&self) -> Result<PathBuf> {
+        info!("Preparing source ISO: {}", self.spec.from);
         
-        let extraction_dir = work_dir.join("extracted");
-        std::fs::create_dir_all(&extraction_dir)
-            .context("Failed to create extraction directory")?;
-        
-        info!("Extracting source ISO: {}", self.config.source.path.display());
-        
-        if !self.config.source.path.exists() {
-            return Err(anyhow::anyhow!("Source ISO file does not exist: {}", 
-                self.config.source.path.display()));
+        let source_path = Path::new(&self.spec.from);
+        if !source_path.exists() {
+            return Err(anyhow::anyhow!("Source ISO file does not exist: {}", self.spec.from));
         }
 
-        // Verify the source ISO checksum
-        if let Some(checksum) = &self.config.source.checksum {
-            verify_checksum(&self.config.source.path, &checksum.checksum_type, &checksum.value)
-                .context("Failed to verify source ISO checksum")?;
+        // Verify checksum if provided
+        if let Some(checksum_info) = &self.spec.checksum {
+            info!("Verifying checksum...");
+            self.checksum_verifier.verify_file(source_path, &checksum_info.algorithm, &checksum_info.value)
+                .context("Checksum verification failed")?;
+        }
+
+        Ok(source_path.to_path_buf())
+    }
+
+    async fn execute_init_stage(&self) -> Result<()> {
+        info!("Executing init stage");
+        
+        if let Some(init_stage) = self.spec.get_stage(&StageType::Init) {
+            let mut vm_manager = self.vm_manager.lock().await;
+            vm_manager.configure_from_stage(init_stage)
+                .context("Failed to configure VM from init stage")?;
         } else {
-            warn!("No checksum specified for source ISO - skipping verification");
+            warn!("No init stage found, using default VM configuration");
         }
-        
-        // Extract the ISO
-        extract::extract_iso(&self.config.source.path, &extraction_dir)
-            .context("Failed to extract ISO")?;
-        
-        info!("Source ISO extracted to: {}", extraction_dir.display());
-        Ok(extraction_dir)
-    }
-    
-    /// Apply modifications to the extracted ISO
-    fn apply_modifications(&self, extraction_dir: &Path) -> Result<()> {
-        info!("Applying {} modifications to ISO", self.config.modifications.len());
-        
-        let modifier = IsoModifier::new(extraction_dir);
-        
-        for (i, modification) in self.config.modifications.iter().enumerate() {
-            debug!("Applying modification {}/{}: {:?}", i + 1, self.config.modifications.len(), modification);
-            
-            match modification {
-                Modification::FileAdd { source, destination, attributes } => {
-                    modifier.add_file(source, destination, attributes.as_ref())
-                        .context(format!("Failed to add file: {} -> {}", source.display(), destination))?;
-                }
-                Modification::FileModify { path, operations } => {
-                    modifier.modify_file(path, operations)
-                        .context(format!("Failed to modify file: {}", path))?;
-                }
-                Modification::FileRemove { path } => {
-                    modifier.remove_file(path)
-                        .context(format!("Failed to remove file: {}", path))?;
-                }
-                Modification::DirectoryAdd { source, destination } => {
-                    modifier.add_directory(source, destination)
-                        .context(format!("Failed to add directory: {} -> {}", source.display(), destination))?;
-                }
-                Modification::AnswerFile { template, destination, variables } => {
-                    modifier.add_answer_file(template, destination, variables)
-                        .context(format!("Failed to add answer file: {} -> {}", template.display(), destination))?;
-                }
-                Modification::BinaryPatch { path, patches } => {
-                    modifier.apply_binary_patches(path, patches)
-                        .context(format!("Failed to apply binary patches to: {}", path))?;
-                }
-                Modification::BootConfig { target, parameters } => {
-                    modifier.configure_boot(target, parameters)
-                        .context(format!("Failed to configure boot for target: {}", target))?;
-                }
-            }
-        }
-        
-        info!("All modifications applied successfully");
+
         Ok(())
     }
-    
-    /// Package the modified ISO
-    fn package_iso(&self, extraction_dir: &Path) -> Result<()> {
-        let output_path = &self.config.output.path;
+
+    async fn execute_os_install_stage(&self, source_iso_path: &Path) -> Result<()> {
+        info!("Executing os_install stage");
         
-        info!("Packaging ISO to: {}", output_path.display());
-        
-        // Create parent directory if it doesn't exist
-        if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent)
-                .context("Failed to create output directory")?;
-        }
-        
-        // Package the ISO
-        package::create_iso(
-            extraction_dir,
-            output_path,
-            &self.config.output.format,
-            self.config.output.options.as_ref()
-        ).context("Failed to create ISO")?;
-        
-        info!("ISO packaged successfully");
-        Ok(())
-    }
-    
-    /// Run hook scripts
-    fn run_hooks(&self, hook_type: &str) -> Result<()> {
-        if let Some(hooks) = &self.config.hooks {
-            let scripts = match hook_type {
-                "pre_extraction" => &hooks.pre_extraction,
-                "post_extraction" => &hooks.post_extraction,
-                "pre_modification" => &hooks.pre_modification,
-                "post_modification" => &hooks.post_modification,
-                "pre_packaging" => &hooks.pre_packaging,
-                "post_packaging" => &hooks.post_packaging,
-                _ => return Err(anyhow::anyhow!("Unknown hook type: {}", hook_type)),
-            };
-            
-            if !scripts.is_empty() {
-                info!("Running {} {} hooks", scripts.len(), hook_type);
-                
-                for (i, script) in scripts.iter().enumerate() {
-                    debug!("Running hook {}/{}: {}", i + 1, scripts.len(), script);
-                    
-                    // Execute the script
-                    let status = Command::new(script)
-                        .current_dir(self.work_dir.as_ref().unwrap())
-                        .status()
-                        .with_context(|| format!("Failed to execute hook script: {}", script))?;
-                    
-                    if !status.success() {
-                        return Err(anyhow::anyhow!("Hook script failed: {}", script));
-                    }
-                }
-                
-                info!("All {} hooks completed successfully", hook_type);
-            }
-        }
-        
-        Ok(())
-    }
-    
-    /// Clean up temporary files
-    fn cleanup(&mut self) -> Result<()> {
-        if self.config.build.cleanup {
-            info!("Cleaning up temporary files");
-            
-            // The TempDir will be automatically deleted when it goes out of scope
-            if self.temp_dir.take().is_some() {
-                debug!("Temporary directory removed");
-            }
+        if let Some(os_install_stage) = self.spec.get_stage(&StageType::OsInstall) {
+            // Start VM with source ISO
+            let mut vm_manager = self.vm_manager.lock().await;
+            let vm_instance = vm_manager.create_vm()
+                .context("Failed to create VM instance")?;
+
+            vm_manager.attach_iso(&vm_instance, source_iso_path).await
+                .context("Failed to attach source ISO to VM")?;
+
+            vm_manager.start_vm(&vm_instance).await
+                .context("Failed to start VM")?;
+
+            // Execute puppet automation
+            let mut puppet_manager = self.puppet_manager.lock().await;
+            puppet_manager.execute_stage_instructions(&vm_instance, os_install_stage).await
+                .context("Failed to execute OS installation instructions")?;
+
+            // Wait for installation completion and shutdown VM
+            vm_manager.wait_for_shutdown(&vm_instance).await
+                .context("Failed to wait for VM shutdown")?;
+
         } else {
-            info!("Skipping cleanup as requested");
-            
-            // If we're not cleaning up, we need to keep the TempDir from being deleted
-            if let Some(temp_dir) = self.temp_dir.take() {
-                let path = temp_dir.into_path();
-                debug!("Temporary directory retained at: {}", path.display());
+            warn!("No os_install stage found, skipping automated installation");
+        }
+
+        Ok(())
+    }
+
+    async fn execute_os_configure_stage(&self) -> Result<()> {
+        info!("Executing os_configure stage");
+        
+        if let Some(os_configure_stage) = self.spec.get_stage(&StageType::OsConfigure) {
+            // Start VM with installed OS (from previous stage)
+            let mut vm_manager = self.vm_manager.lock().await;
+            let vm_instance = vm_manager.get_or_create_configured_vm()
+                .context("Failed to get configured VM")?;
+
+            vm_manager.start_vm(&vm_instance).await
+                .context("Failed to start configured VM")?;
+
+            // Wait for OS boot
+            vm_manager.wait_for_boot(&vm_instance).await
+                .context("Failed to wait for OS boot")?;
+
+            // Execute configuration instructions
+            let mut puppet_manager = self.puppet_manager.lock().await;
+            puppet_manager.execute_stage_instructions(&vm_instance, os_configure_stage).await
+                .context("Failed to execute OS configuration instructions")?;
+
+            // Create live OS snapshot
+            vm_manager.create_live_snapshot(&vm_instance).await
+                .context("Failed to create live OS snapshot")?;
+
+            vm_manager.shutdown_vm(&vm_instance).await
+                .context("Failed to shutdown VM after configuration")?;
+
+        } else {
+            warn!("No os_configure stage found, skipping OS configuration");
+        }
+
+        Ok(())
+    }
+
+    async fn execute_pack_stage(&self) -> Result<()> {
+        info!("Executing pack stage");
+        
+        if let Some(pack_stage) = self.spec.get_stage(&StageType::Pack) {
+            // Extract the configured VM disk/snapshot into ISO format
+            let vm_manager = self.vm_manager.lock().await;
+            let live_snapshot_path = vm_manager.get_live_snapshot_path()
+                .context("No live snapshot available for packaging")?;
+
+            // Convert snapshot to bootable ISO
+            let output_path = self.get_final_output_path(pack_stage)?;
+            self.iso_packager.create_live_iso(&live_snapshot_path, &output_path, pack_stage)
+                .context("Failed to create final ISO")?;
+
+            info!("ISO created successfully: {}", output_path.display());
+        } else {
+            return Err(anyhow::anyhow!("pack stage is required but not found"));
+        }
+
+        Ok(())
+    }
+
+    async fn test_vm_boot(&self, source_iso_path: &Path) -> Result<()> {
+        info!("Testing VM boot with source ISO");
+        
+        let mut vm_manager = self.vm_manager.lock().await;
+        let vm_instance = vm_manager.create_vm()
+            .context("Failed to create test VM")?;
+
+        vm_manager.attach_iso(&vm_instance, source_iso_path).await
+            .context("Failed to attach ISO to test VM")?;
+
+        vm_manager.start_vm(&vm_instance).await
+            .context("Failed to start test VM")?;
+
+        // Wait for successful boot (configurable timeout)
+        vm_manager.wait_for_boot_test(&vm_instance).await
+            .context("VM boot test failed")?;
+
+        vm_manager.shutdown_vm(&vm_instance).await
+            .context("Failed to shutdown test VM")?;
+
+        info!("VM boot test completed successfully");
+        Ok(())
+    }
+
+    fn get_final_output_path(&self, pack_stage: &crate::config::Stage) -> Result<PathBuf> {
+        // Check if output path was provided via CLI
+        if let Some(path) = &self.output_path {
+            return Ok(path.clone());
+        }
+
+        // Look for EXPORT instruction in pack stage
+        for instruction in &pack_stage.instructions {
+            if let crate::config::Instruction::Export { path } = instruction {
+                return Ok(path.clone());
             }
         }
+
+        // Fall back to default based on spec name
+        let default_name = self.spec.get_label("name")
+            .map(|s| format!("{}.iso", s))
+            .unwrap_or_else(|| "output.iso".to_string());
         
+        Ok(PathBuf::from(default_name))
+    }
+
+    async fn cleanup(&self) -> Result<()> {
+        info!("Cleaning up working directory");
+        
+        // Stop and cleanup VMs
+        let mut vm_manager = self.vm_manager.lock().await;
+        vm_manager.cleanup_all().await
+            .context("Failed to cleanup VMs")?;
+
+        // Remove working directory
+        self.fs_manager.cleanup()
+            .context("Failed to cleanup working directory")?;
+
         Ok(())
     }
 }

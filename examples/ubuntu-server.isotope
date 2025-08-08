@@ -1,0 +1,130 @@
+# Ubuntu Server Live ISO with Docker
+FROM ./ubuntu-22.04-server.iso
+CHECKSUM sha256:a4acfda10b18da50e2ec50ccaf860d7f20ce1ee42895e3840b57b2b371fc734
+
+LABEL name="ubuntu-docker-server"
+LABEL version="1.0.0"
+LABEL description="Ubuntu Server 22.04 with Docker pre-installed"
+
+# STAGE init - VM configuration for puppet automation
+STAGE init
+VM provider=qemu
+VM memory=4G
+VM cpus=2
+VM disk=20G
+VM boot-wait=10s
+VM timeout=30m
+
+# STAGE os_install - Automated OS installation keypresses
+STAGE os_install
+# Language selection screen
+WAIT 30s
+PRESS enter
+
+# Keyboard layout selection
+WAIT 3s
+PRESS enter
+WAIT 1s
+PRESS enter
+
+# Network configuration
+WAIT 5s
+PRESS enter
+
+# Proxy configuration
+WAIT 2s
+PRESS enter
+
+# Mirror configuration
+WAIT 3s
+PRESS enter
+
+# Disk configuration
+WAIT 3s
+PRESS down
+PRESS enter
+WAIT 2s
+PRESS enter
+
+# Storage confirmation
+WAIT 3s
+PRESS tab
+PRESS enter
+
+# Destructive action confirmation
+WAIT 2s
+PRESS tab
+PRESS enter
+
+# User profile setup
+WAIT 10s
+TYPE ubuntu
+PRESS tab
+TYPE ubuntu
+PRESS tab
+TYPE ubuntu
+PRESS tab
+TYPE ubuntu
+PRESS tab
+TYPE ubuntu
+PRESS tab
+PRESS enter
+
+# SSH setup
+WAIT 3s
+PRESS down
+PRESS space
+PRESS tab
+PRESS enter
+
+# Skip featured server snaps
+WAIT 3s
+PRESS tab
+PRESS enter
+
+# Wait for installation to complete
+WAIT 30m FOR "Installation complete!"
+PRESS enter
+
+# STAGE os_configure - Live OS configuration
+STAGE os_configure
+# Wait for login prompt
+WAIT 5m FOR login
+TYPE ubuntu
+PRESS enter
+WAIT 500ms
+TYPE ubuntu
+PRESS enter
+WAIT 3s
+
+# Update system
+RUN apt-get update
+RUN apt-get upgrade -y
+
+# Install Docker
+RUN apt-get install -y docker.io
+RUN systemctl enable docker
+RUN systemctl start docker
+RUN usermod -aG docker ubuntu
+
+# Install additional tools
+RUN apt-get install -y curl wget git vim htop
+
+# Copy custom configuration files
+COPY ./configs/docker-daemon.json /etc/docker/daemon.json
+COPY ./scripts/startup.sh /usr/local/bin/startup.sh
+
+# Make startup script executable and enable
+RUN chmod +x /usr/local/bin/startup.sh
+RUN ln -s /usr/local/bin/startup.sh /etc/rc.local
+
+# Configure system settings
+RUN echo "export EDITOR=vim" >> /etc/profile
+RUN echo "alias ll='ls -la'" >> /etc/bash.bashrc
+
+# STAGE pack - Create final bootable ISO
+STAGE pack
+EXPORT ./output/ubuntu-docker-server.iso
+FORMAT iso9660
+BOOTABLE true
+VOLUME_LABEL "Ubuntu Docker Server"

@@ -1,73 +1,79 @@
+pub mod parser;
+pub mod validator;
+pub mod converter;
+
 use anyhow::{Context, Result};
-use log::{debug, info};
-use std::path::Path;
-use std::fs;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
-pub mod schema;
-pub mod validation;
-
-use schema::Config;
-
-/// Load and parse a configuration file
-pub fn load_config<P: AsRef<Path>>(path: P) -> Result<Config> {
-    let path = path.as_ref();
-    info!("Loading configuration from {}", path.display());
-    
-    // Read the file contents
-    let contents = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read config file: {}", path.display()))?;
-    
-    // Parse the JSON contents
-    let config: Config = serde_json::from_str(&contents)
-        .with_context(|| format!("Failed to parse JSON in config file: {}", path.display()))?;
-    
-    // Validate the configuration
-    validation::validate_config_structure(&config)
-        .with_context(|| format!("Invalid configuration in file: {}", path.display()))?;
-    
-    debug!("Successfully loaded config: {:#?}", config);
-    Ok(config)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IsotopeSpec {
+    pub from: String,
+    pub checksum: Option<ChecksumInfo>,
+    pub labels: HashMap<String, String>,
+    pub stages: Vec<Stage>,
 }
 
-/// Validate a configuration file without loading it
-pub fn validate_config<P: AsRef<Path>>(path: P) -> Result<()> {
-    let path = path.as_ref();
-    info!("Validating configuration from {}", path.display());
-    
-    // Read the file contents
-    let contents = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read config file: {}", path.display()))?;
-    
-    // Parse the JSON contents to verify it's valid JSON
-    let config: Config = serde_json::from_str(&contents)
-        .with_context(|| format!("Failed to parse JSON in config file: {}", path.display()))?;
-    
-    // Validate the configuration structure
-    validation::validate_config_structure(&config)
-        .with_context(|| format!("Invalid configuration in file: {}", path.display()))?;
-    
-    info!("Configuration file is valid");
-    Ok(())
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChecksumInfo {
+    pub algorithm: String,
+    pub value: String,
 }
 
-/// Substitute environment variables in a configuration
-pub fn substitute_env_vars(config: &mut Config) -> Result<()> {
-    // This is a placeholder for now
-    // We would iterate through all string values in the config and replace {{ env.VAR_NAME }} patterns
-    // with the corresponding environment variable values
-    
-    info!("Environment variable substitution completed");
-    Ok(())
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Stage {
+    pub name: StageType,
+    pub instructions: Vec<Instruction>,
 }
 
-/// Resolve paths in a configuration relative to the config file
-pub fn resolve_paths<P: AsRef<Path>>(config: &mut Config, base_path: P) -> Result<()> {
-    let base_path = base_path.as_ref();
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum StageType {
+    Init,
+    OsInstall,
+    OsConfigure,
+    Pack,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Instruction {
+    // VM Configuration (init stage)
+    Vm { key: String, value: String },
     
-    // This is a placeholder for now
-    // We would iterate through all path values in the config and resolve them relative to the base_path
-    // if they are relative paths
+    // OS Installation (os_install stage)
+    Wait { duration: String, condition: Option<String> },
+    Press { key: String, repeat: Option<u32> },
+    Type { text: String },
     
-    info!("Path resolution completed relative to {}", base_path.display());
-    Ok(())
+    // OS Configuration (os_configure stage)
+    Run { command: String },
+    Copy { from: PathBuf, to: PathBuf },
+    
+    // Packaging (pack stage)
+    Export { path: PathBuf },
+    Format { format: String },
+    Bootable { enabled: bool },
+    VolumeLabel { label: String },
+}
+
+impl IsotopeSpec {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let content = std::fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read file: {}", path.as_ref().display()))?;
+        
+        parser::parse_isotope_spec(&content)
+            .with_context(|| format!("Failed to parse Isotope spec: {}", path.as_ref().display()))
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        validator::validate_spec(self)
+    }
+
+    pub fn get_stage(&self, stage_type: &StageType) -> Option<&Stage> {
+        self.stages.iter().find(|s| std::mem::discriminant(&s.name) == std::mem::discriminant(stage_type))
+    }
+
+    pub fn get_label(&self, key: &str) -> Option<&String> {
+        self.labels.get(key)
+    }
 }

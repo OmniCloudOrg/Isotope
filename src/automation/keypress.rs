@@ -1,300 +1,258 @@
-use serde::{Deserialize, Serialize};
-use std::fmt;
+use anyhow::{anyhow, Context, Result};
+use std::time::Duration;
+use tokio::time::sleep;
+use tracing::{debug, info};
 
-/// Keypress sequence for VM automation
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct KeypressSequence {
-    /// Optional wait time (e.g., "5s", "500ms", "2m")
-    pub wait: Option<String>,
-    /// Key to press (e.g., "enter", "tab", "esc")
-    pub key: Option<String>,
-    /// Text to type
-    pub key_text: Option<String>,
-    /// Command to execute (e.g., full commands or configurations)
-    pub key_command: Option<String>,
-    /// Number of times to repeat the key press
-    pub repeat: Option<u32>,
-    /// Description of what this keypress sequence does
-    pub description: Option<String>,
+use crate::automation::vm::VmInstance;
+
+#[derive(Debug, Clone)]
+pub enum KeypressAction {
+    Key(String),
+    KeyCombo(String, String),
+    TypeText(String),
+    Wait(Duration),
 }
 
-impl fmt::Display for KeypressSequence {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(desc) = &self.description {
-            return write!(f, "{}", desc);
-        }
-        
-        let mut parts = Vec::new();
-        
-        if let Some(wait) = &self.wait {
-            parts.push(format!("wait {}ms", wait));
-        }
-        
-        if let Some(key) = &self.key {
-            let repeat = self.repeat.unwrap_or(1);
-            if repeat > 1 {
-                parts.push(format!("press {} x{}", key, repeat));
-            } else {
-                parts.push(format!("press {}", key));
+pub struct KeypressExecutor {
+    // Could hold VNC client, RDP client, or other remote control mechanism
+}
+
+impl KeypressExecutor {
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    pub async fn execute_action(&mut self, vm: &VmInstance, action: &KeypressAction) -> Result<()> {
+        match action {
+            KeypressAction::Key(key) => {
+                self.send_key(vm, key).await?;
+            }
+            KeypressAction::KeyCombo(modifier, key) => {
+                self.send_key_combination(vm, modifier, key).await?;
+            }
+            KeypressAction::TypeText(text) => {
+                self.type_text(vm, text).await?;
+            }
+            KeypressAction::Wait(duration) => {
+                debug!("Waiting for {:?}", duration);
+                sleep(*duration).await;
             }
         }
-        
-        if let Some(text) = &self.key_text {
-            parts.push(format!("type \"{}\"", text));
-        }
-        
-        if let Some(cmd) = &self.key_command {
-            parts.push(format!("execute \"{}\"", cmd));
-        }
-        
-        if parts.is_empty() {
-            write!(f, "empty sequence")
-        } else {
-            write!(f, "{}", parts.join(", "))
-        }
-    }
-}
 
-/// Map special key names to their values (for different automation systems)
-pub fn map_key_name(key_name: &str, target_system: &str) -> String {
-    match target_system {
-        "qemu" => map_key_name_qemu(key_name),
-        "virtualbox" => map_key_name_virtualbox(key_name),
-        "vmware" => map_key_name_vmware(key_name),
-        _ => key_name.to_string(),
+        // Small delay between actions to ensure they're processed
+        sleep(Duration::from_millis(50)).await;
+        Ok(())
     }
-}
 
-/// Map special key names to QEMU HMP/QMP commands
-fn map_key_name_qemu(key_name: &str) -> String {
-    match key_name.to_lowercase().as_str() {
-        "enter" => "ret".to_string(),
-        "return" => "ret".to_string(),
-        "tab" => "tab".to_string(),
-        "esc" => "esc".to_string(),
-        "escape" => "esc".to_string(),
-        "space" => "spc".to_string(),
-        "backspace" => "backspace".to_string(),
-        "delete" => "delete".to_string(),
-        "up" => "up".to_string(),
-        "down" => "down".to_string(),
-        "left" => "left".to_string(),
-        "right" => "right".to_string(),
-        "f1" => "f1".to_string(),
-        "f2" => "f2".to_string(),
-        "f3" => "f3".to_string(),
-        "f4" => "f4".to_string(),
-        "f5" => "f5".to_string(),
-        "f6" => "f6".to_string(),
-        "f7" => "f7".to_string(),
-        "f8" => "f8".to_string(),
-        "f9" => "f9".to_string(),
-        "f10" => "f10".to_string(),
-        "f11" => "f11".to_string(),
-        "f12" => "f12".to_string(),
-        "home" => "home".to_string(),
-        "end" => "end".to_string(),
-        "pageup" => "pgup".to_string(),
-        "pagedown" => "pgdn".to_string(),
-        "win" => "meta_l".to_string(),
-        "alt" => "alt".to_string(),
-        "ctrl" => "ctrl".to_string(),
-        "shift" => "shift".to_string(),
-        "capslock" => "caps_lock".to_string(),
-        "numlock" => "num_lock".to_string(),
-        _ => key_name.to_string(),
-    }
-}
-
-/// Map special key names to VirtualBox scancodes
-fn map_key_name_virtualbox(key_name: &str) -> String {
-    match key_name.to_lowercase().as_str() {
-        "enter" => "1c 9c".to_string(),
-        "return" => "1c 9c".to_string(),
-        "tab" => "0f 8f".to_string(),
-        "esc" => "01 81".to_string(),
-        "escape" => "01 81".to_string(),
-        "space" => "39 b9".to_string(),
-        "backspace" => "0e 8e".to_string(),
-        "delete" => "53 d3".to_string(),
-        "up" => "48 c8".to_string(),
-        "down" => "50 d0".to_string(),
-        "left" => "4b cb".to_string(),
-        "right" => "4d cd".to_string(),
-        "f1" => "3b bb".to_string(),
-        "f2" => "3c bc".to_string(),
-        "f3" => "3d bd".to_string(),
-        "f4" => "3e be".to_string(),
-        "f5" => "3f bf".to_string(),
-        "f6" => "40 c0".to_string(),
-        "f7" => "41 c1".to_string(),
-        "f8" => "42 c2".to_string(),
-        "f9" => "43 c3".to_string(),
-        "f10" => "44 c4".to_string(),
-        "f11" => "57 d7".to_string(),
-        "f12" => "58 d8".to_string(),
-        "home" => "47 c7".to_string(),
-        "end" => "4f cf".to_string(),
-        "pageup" => "49 c9".to_string(),
-        "pagedown" => "51 d1".to_string(),
-        "win" => "5b db".to_string(),
-        "alt" => "38 b8".to_string(),
-        "ctrl" => "1d 9d".to_string(),
-        "shift" => "2a aa".to_string(),
-        "capslock" => "3a ba".to_string(),
-        "numlock" => "45 c5".to_string(),
-        _ => {
-            // For regular keys, map to ASCII
-            if key_name.len() == 1 {
-                let c = key_name.chars().next().unwrap();
-                match c {
-                    'a'..='z' => {
-                        let scancode = 0x1e + (c as u8 - b'a');
-                        format!("{:02x} {:02x}", scancode, scancode + 0x80)
-                    },
-                    'A'..='Z' => {
-                        let scancode = 0x1e + (c.to_lowercase().next().unwrap() as u8 - b'a');
-                        format!("2a {:02x} {:02x} aa", scancode, scancode + 0x80)
-                    },
-                    '0'..='9' => {
-                        let scancode = if c == '0' { 0x0b } else { 0x02 + (c as u8 - b'1') };
-                        format!("{:02x} {:02x}", scancode, scancode + 0x80)
-                    },
-                    _ => key_name.to_string(),
-                }
-            } else {
-                key_name.to_string()
+    async fn send_key(&self, vm: &VmInstance, key: &str) -> Result<()> {
+        debug!("Sending key '{}' to VM {}", key, vm.name);
+        
+        match vm.provider {
+            crate::automation::vm::VmProvider::Qemu => {
+                self.send_key_qemu(vm, key).await
+            }
+            crate::automation::vm::VmProvider::VirtualBox => {
+                self.send_key_virtualbox(vm, key).await
+            }
+            crate::automation::vm::VmProvider::VMware => {
+                self.send_key_vmware(vm, key).await
+            }
+            crate::automation::vm::VmProvider::HyperV => {
+                self.send_key_hyperv(vm, key).await
             }
         }
     }
-}
 
-/// Map special key names to VMware keycodes
-fn map_key_name_vmware(key_name: &str) -> String {
-    match key_name.to_lowercase().as_str() {
-        "enter" => "0x0d".to_string(),
-        "return" => "0x0d".to_string(),
-        "tab" => "0x09".to_string(),
-        "esc" => "0x1b".to_string(),
-        "escape" => "0x1b".to_string(),
-        "space" => "0x20".to_string(),
-        "backspace" => "0x08".to_string(),
-        "delete" => "0x7f".to_string(),
-        "up" => "0x26".to_string(),
-        "down" => "0x28".to_string(),
-        "left" => "0x25".to_string(),
-        "right" => "0x27".to_string(),
-        "f1" => "0x70".to_string(),
-        "f2" => "0x71".to_string(),
-        "f3" => "0x72".to_string(),
-        "f4" => "0x73".to_string(),
-        "f5" => "0x74".to_string(),
-        "f6" => "0x75".to_string(),
-        "f7" => "0x76".to_string(),
-        "f8" => "0x77".to_string(),
-        "f9" => "0x78".to_string(),
-        "f10" => "0x79".to_string(),
-        "f11" => "0x7a".to_string(),
-        "f12" => "0x7b".to_string(),
-        "home" => "0x24".to_string(),
-        "end" => "0x23".to_string(),
-        "pageup" => "0x21".to_string(),
-        "pagedown" => "0x22".to_string(),
-        "win" => "0x5b".to_string(),
-        "alt" => "0x12".to_string(),
-        "ctrl" => "0x11".to_string(),
-        "shift" => "0x10".to_string(),
-        "capslock" => "0x14".to_string(),
-        "numlock" => "0x90".to_string(),
-        _ => key_name.to_string(),
-    }
-}
-
-/// Process a key sequence with combinations (e.g., "ctrl+c", "shift+alt+tab")
-pub fn process_key_combination(combination: &str, target_system: &str) -> Vec<String> {
-    let mut keys = Vec::new();
-    let parts: Vec<&str> = combination.split('+').collect();
-    
-    match target_system {
-        "qemu" => {
-            // For QEMU, send each key in the combination
-            for part in parts {
-                keys.push(map_key_name_qemu(part));
+    async fn send_key_combination(&self, vm: &VmInstance, modifier: &str, key: &str) -> Result<()> {
+        debug!("Sending key combination '{}+{}' to VM {}", modifier, key, vm.name);
+        
+        match vm.provider {
+            crate::automation::vm::VmProvider::Qemu => {
+                self.send_key_combo_qemu(vm, modifier, key).await
             }
-        },
-        "virtualbox" => {
-            // For VirtualBox, handle special combinations
-            // This is a simplified implementation for common combinations
-            if combination.to_lowercase() == "ctrl+c" {
-                keys.push("1d 2e ae 9d".to_string()); // ctrl down, c down, c up, ctrl up
-            } else if combination.to_lowercase() == "ctrl+v" {
-                keys.push("1d 2f af 9d".to_string()); // ctrl down, v down, v up, ctrl up
-            } else {
-                // Generic handling for any combination
-                let mut down_codes = Vec::new();
-                let mut up_codes = Vec::new();
-                
-                for part in parts {
-                    let key_code = map_key_name_virtualbox(part);
-                    let codes: Vec<&str> = key_code.split_whitespace().collect();
-                    
-                    // Add down codes
-                    for &code in &codes[0..codes.len() / 2] {
-                        down_codes.push(code.to_string());
-                    }
-                    
-                    // Add up codes in reverse order
-                    for &code in codes[codes.len() / 2..].iter().rev() {
-                        up_codes.push(code.to_string());
-                    }
-                }
-                
-                // Combine all codes
-                let all_codes: Vec<String> = down_codes.into_iter().chain(up_codes.into_iter()).collect();
-                keys.push(all_codes.join(" "));
+            crate::automation::vm::VmProvider::VirtualBox => {
+                self.send_key_combo_virtualbox(vm, modifier, key).await
             }
-        },
-        "vmware" => {
-            // For VMware, convert key combination to VMware format
-            let mut vmware_keys = Vec::new();
-            
-            for part in &parts {
-                let key = map_key_name_vmware(part);
-                vmware_keys.push(key);
+            crate::automation::vm::VmProvider::VMware => {
+                self.send_key_combo_vmware(vm, modifier, key).await
             }
-            
-            keys.push(vmware_keys.join("+"));
-        },
-        _ => {
-            // Default implementation
-            keys.push(combination.to_string());
+            crate::automation::vm::VmProvider::HyperV => {
+                self.send_key_combo_hyperv(vm, modifier, key).await
+            }
         }
     }
-    
-    keys
-}
 
-/// Generate a bootable ISO with a custom keypress sequence for automated installation
-pub fn generate_boot_keypress_iso<P1: AsRef<std::path::Path>, P2: AsRef<std::path::Path>>(
-    source_iso: P1,
-    output_iso: P2,
-    keypress_sequence: &[KeypressSequence],
-    vm_type: &str
-) -> anyhow::Result<()> {
-    // This is a placeholder for actual ISO modification with keypress sequence
-    // In a real implementation, we would:
-    // 1. Extract the ISO
-    // 2. Modify the boot configuration to include the keypress sequence
-    // 3. Repackage the ISO
+    async fn type_text(&self, vm: &VmInstance, text: &str) -> Result<()> {
+        info!("Typing text to VM {}: '{}'", vm.name, text);
+        
+        for ch in text.chars() {
+            self.send_key(vm, &ch.to_string()).await?;
+            sleep(Duration::from_millis(10)).await; // Delay between characters
+        }
+        
+        Ok(())
+    }
+
+    // QEMU implementations (using QEMU monitor or VNC)
     
-    use log::info;
+    async fn send_key_qemu(&self, vm: &VmInstance, key: &str) -> Result<()> {
+        // Implementation would use QEMU monitor commands or VNC
+        // For now, this is a placeholder that simulates the keypress
+        let qemu_key = self.map_key_to_qemu(key)?;
+        debug!("QEMU: Would send key '{}' (mapped to '{}')", key, qemu_key);
+        
+        // In real implementation:
+        // 1. Connect to QEMU monitor via QMP or telnet
+        // 2. Send "sendkey <key>" command
+        // 3. Or use VNC client to send keypress
+        
+        Ok(())
+    }
+
+    async fn send_key_combo_qemu(&self, vm: &VmInstance, modifier: &str, key: &str) -> Result<()> {
+        let qemu_modifier = self.map_modifier_to_qemu(modifier)?;
+        let qemu_key = self.map_key_to_qemu(key)?;
+        
+        debug!("QEMU: Would send key combo '{}+{}' (mapped to '{}+{}')", 
+               modifier, key, qemu_modifier, qemu_key);
+        
+        // In real implementation:
+        // 1. Send modifier key down
+        // 2. Send main key press
+        // 3. Send modifier key up
+        
+        Ok(())
+    }
+
+    // VirtualBox implementations (using VBoxManage)
     
-    info!("Generating bootable ISO with keypress sequence");
-    info!("Source ISO: {}", source_iso.as_ref().display());
-    info!("Output ISO: {}", output_iso.as_ref().display());
-    info!("VM type: {}", vm_type);
-    info!("Keypress sequence: {:?}", keypress_sequence);
+    async fn send_key_virtualbox(&self, vm: &VmInstance, key: &str) -> Result<()> {
+        let vbox_scancode = self.map_key_to_virtualbox_scancode(key)?;
+        debug!("VirtualBox: Would send key '{}' (scancode: {})", key, vbox_scancode);
+        
+        // In real implementation:
+        // VBoxManage controlvm <vm_name> keyboardputscancode <scancode>
+        
+        Ok(())
+    }
+
+    async fn send_key_combo_virtualbox(&self, vm: &VmInstance, modifier: &str, key: &str) -> Result<()> {
+        let modifier_scancode = self.map_modifier_to_virtualbox_scancode(modifier)?;
+        let key_scancode = self.map_key_to_virtualbox_scancode(key)?;
+        
+        debug!("VirtualBox: Would send key combo '{}+{}' (scancodes: {}, {})", 
+               modifier, key, modifier_scancode, key_scancode);
+        
+        Ok(())
+    }
+
+    // VMware implementations
     
-    // For now, we'll just return Ok
-    Ok(())
+    async fn send_key_vmware(&self, vm: &VmInstance, key: &str) -> Result<()> {
+        debug!("VMware: Would send key '{}' to VM {}", key, vm.name);
+        // Implementation would use VMware VIX API or vmrun commands
+        Ok(())
+    }
+
+    async fn send_key_combo_vmware(&self, vm: &VmInstance, modifier: &str, key: &str) -> Result<()> {
+        debug!("VMware: Would send key combo '{}+{}' to VM {}", modifier, key, vm.name);
+        Ok(())
+    }
+
+    // Hyper-V implementations
+    
+    async fn send_key_hyperv(&self, vm: &VmInstance, key: &str) -> Result<()> {
+        debug!("Hyper-V: Would send key '{}' to VM {}", key, vm.name);
+        // Implementation would use PowerShell cmdlets or RDP
+        Ok(())
+    }
+
+    async fn send_key_combo_hyperv(&self, vm: &VmInstance, modifier: &str, key: &str) -> Result<()> {
+        debug!("Hyper-V: Would send key combo '{}+{}' to VM {}", modifier, key, vm.name);
+        Ok(())
+    }
+
+    // Key mapping utilities
+    
+    fn map_key_to_qemu(&self, key: &str) -> Result<String> {
+        let binding = key.to_lowercase();
+        let mapped = match binding.as_str() {
+            "return" | "enter" => "ret",
+            "escape" | "esc" => "esc",
+            "tab" => "tab",
+            "space" => "spc",
+            "up" => "up",
+            "down" => "down", 
+            "left" => "left",
+            "right" => "right",
+            "f1" => "f1",
+            "f2" => "f2",
+            "f3" => "f3",
+            "f4" => "f4",
+            "f5" => "f5",
+            "f6" => "f6",
+            "f7" => "f7",
+            "f8" => "f8",
+            "f9" => "f9",
+            "f10" => "f10",
+            "f11" => "f11",
+            "f12" => "f12",
+            single_char if single_char.len() == 1 => single_char,
+            _ => return Err(anyhow!("Unknown key for QEMU mapping: {}", key)),
+        };
+        
+        Ok(mapped.to_string())
+    }
+
+    fn map_modifier_to_qemu(&self, modifier: &str) -> Result<String> {
+        let mapped = match modifier.to_lowercase().as_str() {
+            "ctrl" => "ctrl",
+            "alt" => "alt",
+            "shift" => "shift",
+            "win" | "cmd" | "meta" => "meta",
+            _ => return Err(anyhow!("Unknown modifier for QEMU: {}", modifier)),
+        };
+        
+        Ok(mapped.to_string())
+    }
+
+    fn map_key_to_virtualbox_scancode(&self, key: &str) -> Result<String> {
+        let scancode = match key.to_lowercase().as_str() {
+            "return" | "enter" => "1c 9c",
+            "escape" | "esc" => "01 81",
+            "tab" => "0f 8f",
+            "space" => "39 b9",
+            "up" => "48 c8",
+            "down" => "50 d0",
+            "left" => "4b cb",
+            "right" => "4d cd",
+            "f1" => "3b bb",
+            "f2" => "3c bc",
+            "f3" => "3d bd",
+            "f4" => "3e be",
+            "f5" => "3f bf",
+            "f6" => "40 c0",
+            "f7" => "41 c1",
+            "f8" => "42 c2",
+            "f9" => "43 c3",
+            "f10" => "44 c4",
+            "f11" => "57 d7",
+            "f12" => "58 d8",
+            // Add more mappings as needed
+            _ => return Err(anyhow!("Unknown key for VirtualBox scancode: {}", key)),
+        };
+        
+        Ok(scancode.to_string())
+    }
+
+    fn map_modifier_to_virtualbox_scancode(&self, modifier: &str) -> Result<String> {
+        let scancode = match modifier.to_lowercase().as_str() {
+            "ctrl" => "1d",
+            "alt" => "38", 
+            "shift" => "2a",
+            _ => return Err(anyhow!("Unknown modifier for VirtualBox: {}", modifier)),
+        };
+        
+        Ok(scancode.to_string())
+    }
 }

@@ -1,3 +1,7 @@
 pub mod checksum;
-pub mod template;
 pub mod fs;
+pub mod template;
+
+pub use checksum::ChecksumVerifier;
+pub use fs::FileSystemManager;
+pub use template::TemplateEngine;

@@ -1,85 +1,99 @@
 use anyhow::{Context, Result};
-use log::{debug, info};
-use std::process;
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+use tracing::{error, info};
 
-mod automation;
 mod cli;
 mod config;
 mod core;
 mod iso;
+mod automation;
 mod utils;
 
-use cli::Command;
-use core::builder::IsoBuilder;
+use cli::Commands;
+use config::IsotopeSpec;
+use core::Builder;
+
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+#[command(name = "isotope")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+
+    #[arg(short, long)]
+    verbose: bool,
+
+    #[arg(short, long)]
+    config: Option<PathBuf>,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let cli = Cli::parse();
+
     // Initialize logging
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .format_timestamp(Some(env_logger::fmt::TimestampPrecision::Millis))
+    let log_level = if cli.verbose { "debug" } else { "info" };
+    tracing_subscriber::fmt()
+        .with_env_filter(format!("isotope={},warn", log_level))
         .init();
 
-    info!("Starting ISOtope v{}", env!("CARGO_PKG_VERSION"));
-    debug!("Debug logging enabled");
+    info!("Isotope v{} starting", env!("CARGO_PKG_VERSION"));
 
-    // Parse command line arguments
-    let opts = cli::parse_args().context("Failed to parse command line arguments")?;
-    debug!("Command line arguments: {:?}", opts);
-
-    // Execute the requested command
-    match opts.command {
-        Command::Build(build_opts) => {
-            info!("Building ISO from configuration file: {}", build_opts.config.display());
+    let result = match cli.command {
+        Commands::Build { spec_file, output } => {
+            info!("Building ISO from specification: {}", spec_file.display());
             
-            // Parse and validate the configuration file
-            let config = config::load_config(&build_opts.config)
-                .context("Failed to load configuration file")?;
+            let spec = IsotopeSpec::from_file(&spec_file)
+                .with_context(|| format!("Failed to load spec file: {}", spec_file.display()))?;
             
-            // Create a builder for the ISO
-            let mut builder = IsoBuilder::new(config);
+            let mut builder = Builder::new(spec);
             
-            // Execute the build process
-            builder.build()
-                .context("Failed to build ISO")?;
+            if let Some(output_path) = output {
+                builder.set_output_path(output_path);
+            }
             
-            info!("ISO build completed successfully!");
+            builder.build().await
         }
-        Command::Validate(validate_opts) => {
-            info!("Validating configuration file: {}", validate_opts.config.display());
+        Commands::Validate { spec_file } => {
+            info!("Validating specification: {}", spec_file.display());
             
-            // Parse and validate the configuration file
-            match config::validate_config(&validate_opts.config) {
-                Ok(_) => {
-                    info!("Configuration file is valid");
+            match IsotopeSpec::from_file(&spec_file) {
+                Ok(spec) => {
+                    info!("✓ Specification is valid");
+                    spec.validate()
                 }
                 Err(e) => {
-                    eprintln!("Configuration file is invalid: {}", e);
-                    process::exit(1);
+                    error!("✗ Specification is invalid: {}", e);
+                    Err(e)
                 }
             }
         }
-        Command::Test(test_opts) => {
-            info!("Testing ISO: {}", test_opts.iso.display());
+        Commands::Test { spec_file } => {
+            info!("Testing specification: {}", spec_file.display());
             
-            // Run the test process
-            let test_result = core::tester::test_iso(&test_opts.iso, test_opts.vm_provider.as_deref())
-                .context("Failed to test ISO")?;
+            let spec = IsotopeSpec::from_file(&spec_file)
+                .with_context(|| format!("Failed to load spec file: {}", spec_file.display()))?;
             
-            if test_result.success {
-                info!("ISO test completed successfully!");
-            } else {
-                eprintln!("ISO test failed: {}", test_result.message.unwrap_or_default());
-                process::exit(1);
-            }
+            let builder = Builder::new(spec);
+            builder.test().await
         }
-        Command::Version => {
-            println!("ISOtope v{}", env!("CARGO_PKG_VERSION"));
-            println!("A flexible, OS-agnostic ISO builder for automated deployments");
-            println!();
-            println!("License: {}", env!("CARGO_PKG_LICENSE"));
-            println!("Authors: {}", env!("CARGO_PKG_AUTHORS"));
+        Commands::Convert { input, output } => {
+            info!("Converting {} to Isotope format", input.display());
+            
+            config::converter::convert_json_to_isotope(&input, &output)
+                .with_context(|| "Failed to convert configuration")
+        }
+    };
+
+    match result {
+        Ok(_) => {
+            info!("✓ Operation completed successfully");
+            Ok(())
+        }
+        Err(e) => {
+            error!("✗ Operation failed: {}", e);
+            std::process::exit(1);
         }
     }
-
-    Ok(())
 }

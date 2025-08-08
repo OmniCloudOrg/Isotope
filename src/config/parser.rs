@@ -1,0 +1,191 @@
+use anyhow::{anyhow, Context, Result};
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use super::{ChecksumInfo, Instruction, IsotopeSpec, Stage, StageType};
+
+pub fn parse_isotope_spec(content: &str) -> Result<IsotopeSpec> {
+    let mut lines = content.lines().enumerate().peekable();
+    let mut from = String::new();
+    let mut checksum = None;
+    let mut labels = HashMap::new();
+    let mut stages = Vec::new();
+    let mut current_stage: Option<Stage> = None;
+
+    while let Some((line_num, line)) = lines.next() {
+        let line = line.trim();
+        
+        // Skip empty lines and comments
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let parts: Vec<&str> = line.splitn(2, ' ').collect();
+        let instruction = parts[0];
+        let args = if parts.len() > 1 { parts[1] } else { "" };
+
+        match instruction {
+            "FROM" => {
+                from = args.to_string();
+            }
+            "CHECKSUM" => {
+                let checksum_parts: Vec<&str> = args.splitn(2, ':').collect();
+                if checksum_parts.len() != 2 {
+                    return Err(anyhow!("Line {}: Invalid CHECKSUM format. Expected 'algorithm:value'", line_num + 1));
+                }
+                checksum = Some(ChecksumInfo {
+                    algorithm: checksum_parts[0].to_string(),
+                    value: checksum_parts[1].to_string(),
+                });
+            }
+            "LABEL" => {
+                let label_parts: Vec<&str> = args.splitn(2, '=').collect();
+                if label_parts.len() != 2 {
+                    return Err(anyhow!("Line {}: Invalid LABEL format. Expected 'key=value'", line_num + 1));
+                }
+                labels.insert(label_parts[0].to_string(), label_parts[1].trim_matches('"').to_string());
+            }
+            "STAGE" => {
+                // Save previous stage if exists
+                if let Some(stage) = current_stage.take() {
+                    stages.push(stage);
+                }
+                
+                let stage_type = match args {
+                    "init" => StageType::Init,
+                    "os_install" => StageType::OsInstall,
+                    "os_configure" => StageType::OsConfigure,
+                    "pack" => StageType::Pack,
+                    _ => return Err(anyhow!("Line {}: Unknown stage type '{}'", line_num + 1, args)),
+                };
+                
+                current_stage = Some(Stage {
+                    name: stage_type,
+                    instructions: Vec::new(),
+                });
+            }
+            _ => {
+                // Parse stage-specific instructions
+                if let Some(ref mut stage) = current_stage {
+                    let instruction = parse_stage_instruction(instruction, args, line_num + 1)?;
+                    stage.instructions.push(instruction);
+                } else {
+                    return Err(anyhow!("Line {}: Instruction '{}' found outside of stage", line_num + 1, instruction));
+                }
+            }
+        }
+    }
+
+    // Save the last stage
+    if let Some(stage) = current_stage {
+        stages.push(stage);
+    }
+
+    if from.is_empty() {
+        return Err(anyhow!("Missing FROM instruction"));
+    }
+
+    Ok(IsotopeSpec {
+        from,
+        checksum,
+        labels,
+        stages,
+    })
+}
+
+fn parse_stage_instruction(instruction: &str, args: &str, line_num: usize) -> Result<Instruction> {
+    match instruction {
+        // VM Configuration
+        "VM" => {
+            let vm_parts: Vec<&str> = args.splitn(2, '=').collect();
+            if vm_parts.len() != 2 {
+                return Err(anyhow!("Line {}: Invalid VM format. Expected 'key=value'", line_num));
+            }
+            Ok(Instruction::Vm {
+                key: vm_parts[0].to_string(),
+                value: vm_parts[1].to_string(),
+            })
+        }
+        
+        // OS Installation
+        "WAIT" => {
+            if args.contains(" FOR ") {
+                let wait_parts: Vec<&str> = args.splitn(2, " FOR ").collect();
+                Ok(Instruction::Wait {
+                    duration: wait_parts[0].to_string(),
+                    condition: Some(wait_parts[1].trim_matches('"').to_string()),
+                })
+            } else {
+                Ok(Instruction::Wait {
+                    duration: args.to_string(),
+                    condition: None,
+                })
+            }
+        }
+        "PRESS" => {
+            let mut parts = args.split_whitespace();
+            let key = parts.next().unwrap_or("").to_string();
+            let mut repeat = None;
+            
+            // Check for repeat count
+            if let Some(next) = parts.next() {
+                if next == "repeat" || next == "x" {
+                    if let Some(count_str) = parts.next() {
+                        repeat = count_str.parse().ok();
+                    }
+                }
+            }
+            
+            Ok(Instruction::Press { key, repeat })
+        }
+        "TYPE" => {
+            Ok(Instruction::Type {
+                text: args.trim_matches('"').to_string(),
+            })
+        }
+        
+        // OS Configuration
+        "RUN" => {
+            Ok(Instruction::Run {
+                command: args.to_string(),
+            })
+        }
+        "COPY" => {
+            let copy_parts: Vec<&str> = args.splitn(2, ' ').collect();
+            if copy_parts.len() != 2 {
+                return Err(anyhow!("Line {}: Invalid COPY format. Expected 'source destination'", line_num));
+            }
+            Ok(Instruction::Copy {
+                from: PathBuf::from(copy_parts[0]),
+                to: PathBuf::from(copy_parts[1]),
+            })
+        }
+        
+        // Packaging
+        "EXPORT" => {
+            Ok(Instruction::Export {
+                path: PathBuf::from(args),
+            })
+        }
+        "FORMAT" => {
+            Ok(Instruction::Format {
+                format: args.to_string(),
+            })
+        }
+        "BOOTABLE" => {
+            let enabled = match args.to_lowercase().as_str() {
+                "true" | "yes" | "1" => true,
+                "false" | "no" | "0" => false,
+                _ => return Err(anyhow!("Line {}: Invalid BOOTABLE value. Expected true/false", line_num)),
+            };
+            Ok(Instruction::Bootable { enabled })
+        }
+        "VOLUME_LABEL" => {
+            Ok(Instruction::VolumeLabel {
+                label: args.trim_matches('"').to_string(),
+            })
+        }
+        
+        _ => Err(anyhow!("Line {}: Unknown instruction '{}'", line_num, instruction)),
+    }
+}

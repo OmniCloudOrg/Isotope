@@ -66,6 +66,9 @@ ssh2 = "0.9"
 # UUID generation
 uuid = { version = "1.6", features = ["v4"] }
 
+# Async traits
+async-trait = "0.1"
+
 # Platform-specific dependencies
 [target.'cfg(unix)'.dependencies]
 # Unix-specific dependencies
