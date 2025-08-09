@@ -1,60 +1,162 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use image::DynamicImage;
-use std::process::Command;
-use std::io::Write;
-use tempfile::NamedTempFile;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
+use ocrs::{OcrEngine as OcrsEngine, OcrEngineParams, ImageSource};
 
 pub struct OcrEngine {
-    engine_type: OcrEngineType,
-}
-
-#[derive(Debug, Clone)]
-pub enum OcrEngineType {
-    Tesseract,
-    WindowsOcr,
-    Fallback,
+    engine: OcrsEngine,
 }
 
 impl OcrEngine {
     pub fn new() -> Self {
-        // Try to detect available OCR engines
-        let engine_type = Self::detect_available_engine();
-        debug!("Using OCR engine: {:?}", engine_type);
+        info!("Initializing OCR engine using ocrs (pure Rust ML-based OCR)");
         
-        Self { engine_type }
-    }
-    
-    fn detect_available_engine() -> OcrEngineType {
-        // First try Tesseract
-        if Self::is_tesseract_available() {
-            return OcrEngineType::Tesseract;
-        }
+        // Create OCR engine with default parameters (no external models needed)
+        let engine = OcrsEngine::new(OcrEngineParams::default())
+            .expect("Failed to initialize OCR engine");
         
-        // On Windows, try Windows OCR
-        #[cfg(windows)]
-        {
-            return OcrEngineType::WindowsOcr;
-        }
-        
-        // Fallback to simple pattern matching
-        OcrEngineType::Fallback
-    }
-    
-    fn is_tesseract_available() -> bool {
-        Command::new("tesseract")
-            .arg("--version")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
+        Self { engine }
     }
     
     pub async fn extract_text(&self, image: &DynamicImage) -> Result<String> {
-        match self.engine_type {
-            OcrEngineType::Tesseract => self.tesseract_ocr(image).await,
-            OcrEngineType::WindowsOcr => self.windows_ocr(image).await,
-            OcrEngineType::Fallback => self.fallback_ocr(image).await,
+        debug!("Extracting text using ocrs ML-based OCR");
+        
+        // Convert to RGB format for ocrs
+        let rgb_image = image.to_rgb8();
+        let (width, height) = rgb_image.dimensions();
+        
+        info!("=== SCREEN CAPTURE ANALYSIS ===");
+        info!("Image dimensions: {}x{}", width, height);
+        info!("Image format: {:?}", image.color());
+        info!("RGB image raw data length: {} bytes", rgb_image.as_raw().len());
+        
+        // Check if image is completely black or white (common issues)
+        let pixel_data = rgb_image.as_raw();
+        let total_pixels = (width * height) as usize;
+        let mut black_pixels = 0;
+        let mut white_pixels = 0;
+        
+        for chunk in pixel_data.chunks_exact(3) {
+            if chunk[0] == 0 && chunk[1] == 0 && chunk[2] == 0 {
+                black_pixels += 1;
+            } else if chunk[0] == 255 && chunk[1] == 255 && chunk[2] == 255 {
+                white_pixels += 1;
+            }
         }
+        
+        let black_percentage = (black_pixels * 100) / total_pixels;
+        let white_percentage = (white_pixels * 100) / total_pixels;
+        
+        info!("Image analysis: {}% black pixels, {}% white pixels", black_percentage, white_percentage);
+        
+        if black_percentage > 95 {
+            warn!("Image is {}% black - screen capture may be blank/failed", black_percentage);
+        }
+        if white_percentage > 95 {
+            warn!("Image is {}% white - screen may be blank or not displaying content", white_percentage);
+        }
+        
+        // Save a copy of the screenshot for debugging 
+        let debug_path = format!("debug-screenshot-{}.png", std::process::id());
+        if let Err(e) = image.save(&debug_path) {
+            warn!("Failed to save debug screenshot: {}", e);
+        } else {
+            info!("Saved debug screenshot to: {} ({}% black, {}% white)", 
+                  debug_path, black_percentage, white_percentage);
+        }
+        
+        info!("===============================");
+        
+        // Create image source for OCR
+        let img_source = ImageSource::from_bytes(
+            rgb_image.as_raw(), 
+            (width, height)
+        ).context("Failed to create image source")?;
+        
+        // Prepare input for OCR processing
+        let ocr_input = self.engine.prepare_input(img_source)
+            .context("Failed to prepare OCR input")?;
+        
+        // Step 1: Detect word rectangles - handle failures gracefully
+        info!("OCR Step 1: Detecting words...");
+        let word_rects = match self.engine.detect_words(&ocr_input) {
+            Ok(rects) => {
+                info!("OCR detected {} word regions", rects.len());
+                rects
+            }
+            Err(e) => {
+                warn!("OCR word detection failed: {}. This is common with dark/low-contrast screens.", e);
+                info!("Skipping word detection and attempting direct text recognition");
+                
+                // Return empty vec to proceed with alternative approaches
+                Vec::new()
+            }
+        };
+        
+        // Step 2: Find text lines from word rectangles  
+        info!("OCR Step 2: Finding text lines...");
+        let line_rects = if word_rects.is_empty() {
+            info!("No word regions available. Using basic image regions for text detection.");
+            Vec::new()
+        } else {
+            self.engine.find_text_lines(&ocr_input, &word_rects)
+        };
+        
+        info!("OCR found {} text lines", line_rects.len());
+        
+        // Step 3: Recognize text - if we have no lines, still attempt recognition on full image
+        info!("OCR Step 3: Recognizing text...");
+        let line_texts = if !line_rects.is_empty() {
+            // Normal case: recognize text in detected lines
+            match self.engine.recognize_text(&ocr_input, &line_rects) {
+                Ok(texts) => texts,
+                Err(e) => {
+                    warn!("Text recognition failed on detected lines: {}", e);
+                    Vec::new()
+                }
+            }
+        } else {
+            warn!("No text lines detected. Attempting basic text extraction...");
+            
+            // For cases where word/line detection fails (dark screens, etc.)
+            // Try alternative recognition approaches or return empty
+            // Note: ocrs might not support direct full-image recognition
+            // so we may need to return empty and handle this case
+            Vec::new()
+        };
+        
+        info!("OCR recognition returned {} results", line_texts.len());
+        
+        // Combine all recognized text
+        let extracted_text = line_texts
+            .iter()
+            .flatten()
+            .filter(|line| line.to_string().len() > 1) // Filter out very short detections
+            .map(|line| line.to_string())
+            .collect::<Vec<String>>()
+            .join(" ");
+        
+        info!("OCR extracted text: '{}'", extracted_text);
+        
+        // Always dump what OCR sees for debugging
+        if extracted_text.is_empty() {
+            if black_percentage > 90 {
+                warn!("OCR found NO TEXT on screen. Screen is {}% black - likely at boot screen, BIOS, or blank display", black_percentage);
+                info!("This may be normal if VM is still booting or at a menu with minimal text");
+            } else {
+                warn!("OCR found NO TEXT but screen has only {}% black pixels - OCR may have failed", black_percentage);
+                info!("The screen has content but OCR couldn't extract text from it");
+            }
+        } else {
+            info!("=== WHAT OCR SEES ON SCREEN ===");
+            info!("Full extracted text: '{}'", extracted_text);
+            info!("Text length: {} characters", extracted_text.len());
+            info!("Word count: {} words", extracted_text.split_whitespace().count());
+            info!("Screen composition: {}% black, {}% white pixels", black_percentage, white_percentage);
+            info!("================================");
+        }
+        
+        Ok(extracted_text)
     }
     
     pub async fn contains_text(&self, image: &DynamicImage, pattern: &str) -> Result<bool> {
@@ -79,141 +181,6 @@ impl OcrEngine {
         }
         
         Ok(false)
-    }
-    
-    async fn tesseract_ocr(&self, image: &DynamicImage) -> Result<String> {
-        debug!("Using Tesseract OCR");
-        
-        // Save image to temporary file
-        let mut temp_file = NamedTempFile::new()
-            .context("Failed to create temporary file")?;
-        
-        // Save as PNG
-        image.save_with_format(temp_file.path(), image::ImageFormat::Png)
-            .context("Failed to save image to temporary file")?;
-        
-        // Run tesseract
-        let output = Command::new("tesseract")
-            .arg(temp_file.path())
-            .arg("stdout")
-            .arg("-l")
-            .arg("eng")
-            .output()
-            .context("Failed to execute tesseract")?;
-        
-        if !output.status.success() {
-            return Err(anyhow!("Tesseract failed: {}", 
-                String::from_utf8_lossy(&output.stderr)));
-        }
-        
-        let text = String::from_utf8(output.stdout)
-            .context("Tesseract output is not valid UTF-8")?;
-        
-        Ok(text.trim().to_string())
-    }
-    
-    async fn windows_ocr(&self, _image: &DynamicImage) -> Result<String> {
-        #[cfg(windows)]
-        {
-            // This would use Windows.Media.Ocr API via PowerShell or direct WinRT calls
-            // For now, implement a simple PowerShell-based OCR
-            warn!("Windows OCR not fully implemented, using fallback");
-            self.fallback_ocr(_image).await
-        }
-        
-        #[cfg(not(windows))]
-        {
-            Err(anyhow!("Windows OCR not available on this platform"))
-        }
-    }
-    
-    async fn fallback_ocr(&self, image: &DynamicImage) -> Result<String> {
-        debug!("Using fallback OCR (simple pattern detection)");
-        
-        // This is a very simple fallback that looks for common patterns
-        // In a production system, you'd want a proper OCR library
-        
-        // Convert to grayscale and analyze pixel patterns
-        let gray_image = image.to_luma8();
-        let (width, height) = gray_image.dimensions();
-        
-        // Simple heuristics for common text patterns
-        let mut detected_patterns = Vec::new();
-        
-        // Look for horizontal lines (potential text baselines)
-        let mut horizontal_lines = 0;
-        for y in 0..height {
-            let mut line_pixels = 0;
-            for x in 0..width {
-                let pixel = gray_image.get_pixel(x, y);
-                if pixel[0] < 128 { // Dark pixel
-                    line_pixels += 1;
-                }
-            }
-            if line_pixels > width / 4 {
-                horizontal_lines += 1;
-            }
-        }
-        
-        // Basic pattern detection for common boot/login screens
-        if horizontal_lines > 5 {
-            detected_patterns.push("text_detected");
-        }
-        
-        // Look for common login screen patterns
-        if self.has_login_pattern(&gray_image) {
-            detected_patterns.push("login");
-        }
-        
-        if self.has_desktop_pattern(&gray_image) {
-            detected_patterns.push("desktop");
-        }
-        
-        Ok(detected_patterns.join(" "))
-    }
-    
-    fn has_login_pattern(&self, image: &image::GrayImage) -> bool {
-        // Simple heuristic: login screens often have centered text areas
-        let (width, height) = image.dimensions();
-        let center_x = width / 2;
-        let center_y = height / 2;
-        
-        // Check for dark regions in the center (text input boxes)
-        let mut dark_pixels_center = 0;
-        let check_size = 50;
-        
-        for y in (center_y.saturating_sub(check_size))..=(center_y + check_size).min(height - 1) {
-            for x in (center_x.saturating_sub(check_size))..=(center_x + check_size).min(width - 1) {
-                let pixel = image.get_pixel(x, y);
-                if pixel[0] < 100 {
-                    dark_pixels_center += 1;
-                }
-            }
-        }
-        
-        // If there's a significant concentration of dark pixels in center, might be login
-        dark_pixels_center > (check_size * check_size) / 4
-    }
-    
-    fn has_desktop_pattern(&self, image: &image::GrayImage) -> bool {
-        // Desktop patterns often have icons or taskbars at edges
-        let (width, height) = image.dimensions();
-        
-        // Check bottom edge for taskbar (often darker than background)
-        let mut bottom_dark_pixels = 0;
-        let taskbar_height = 50;
-        
-        for y in (height.saturating_sub(taskbar_height))..height {
-            for x in 0..width {
-                let pixel = image.get_pixel(x, y);
-                if pixel[0] < 150 {
-                    bottom_dark_pixels += 1;
-                }
-            }
-        }
-        
-        // If bottom area has many dark pixels, might be desktop with taskbar
-        bottom_dark_pixels > (width * taskbar_height) / 3
     }
 }
 

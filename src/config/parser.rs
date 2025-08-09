@@ -111,9 +111,19 @@ fn parse_stage_instruction(instruction: &str, args: &str, line_num: usize) -> Re
         "WAIT" => {
             if args.contains(" FOR ") {
                 let wait_parts: Vec<&str> = args.splitn(2, " FOR ").collect();
+                let mut condition_text = wait_parts[1].trim();
+                
+                // Strip comments first
+                if let Some(comment_pos) = condition_text.find('#') {
+                    condition_text = condition_text[..comment_pos].trim();
+                }
+                
+                // Then strip quotes from the cleaned text
+                condition_text = condition_text.trim_matches('"');
+                
                 Ok(Instruction::Wait {
                     duration: wait_parts[0].to_string(),
-                    condition: Some(wait_parts[1].trim_matches('"').to_string()),
+                    condition: Some(condition_text.to_string()),
                 })
             } else {
                 Ok(Instruction::Wait {

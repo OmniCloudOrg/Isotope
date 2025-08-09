@@ -284,18 +284,23 @@ impl PuppetManager {
             // Capture the VM screen
             match vm_manager.capture_screen(vm).await {
                 Ok(image) => {
-                    // Use OCR to detect text in the image
-                    match self.ocr_engine.contains_text(&image, pattern).await {
-                        Ok(true) => {
-                            info!("Found screen text '{}' on VM {} (attempt {})", pattern, vm.name, attempts);
-                            return Ok(());
-                        }
-                        Ok(false) => {
-                            debug!("Screen text '{}' not found yet (attempt {})", pattern, attempts);
+                    // Extract all text to see what OCR is finding
+                    match self.ocr_engine.extract_text(&image).await {
+                        Ok(extracted_text) => {
+                            if attempts <= 3 || attempts % 10 == 0 {
+                                info!("OCR extracted text (attempt {}): '{}'", attempts, extracted_text);
+                            }
+                            
+                            // Check if pattern is found in the extracted text (case-insensitive)
+                            if extracted_text.to_lowercase().contains(&pattern.to_lowercase()) {
+                                info!("Found screen text '{}' on VM {} (attempt {})", pattern, vm.name, attempts);
+                                return Ok(());
+                            } else {
+                                debug!("Pattern '{}' not found in extracted text (attempt {})", pattern, attempts);
+                            }
                         }
                         Err(e) => {
-                            warn!("OCR error during screen text detection: {}", e);
-                            // Continue trying even if OCR fails - might be temporary issue
+                            warn!("OCR error during text extraction: {}", e);
                         }
                     }
                 }

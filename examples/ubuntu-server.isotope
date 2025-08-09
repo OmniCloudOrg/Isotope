@@ -20,7 +20,7 @@ STAGE os_install
 
 ## Wait for Ubuntu Server to fully boot and show the installation menu
 # Use a more specific pattern to avoid matching boot log
-WAIT 2m FOR "\u001b\[?25h\u001b\[?25lUbuntu Server"  # Looks for cursor movement + title, adjust as needed
+WAIT 2m FOR "Ubuntu Server"  # Looks for cursor movement + title, adjust as needed
 
 # Try to access boot menu or wait for automatic boot
 # If GRUB menu appears, select "Try or Install Ubuntu Server"

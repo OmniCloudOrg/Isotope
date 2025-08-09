@@ -418,9 +418,11 @@ impl VmProviderTrait for VirtualBoxProvider {
     }
 
     async fn capture_screen(&self, instance: &VmInstance) -> Result<DynamicImage> {
-        debug!("Capturing screen from VirtualBox VM: {}", instance.name);
+        info!("=== VBOX SCREEN CAPTURE START ===");
+        info!("Capturing screen from VirtualBox VM: {}", instance.name);
 
         let screenshot_path = format!("{}-screenshot.png", instance.name);
+        info!("Screenshot will be saved to: {}", screenshot_path);
         
         let output = self.vboxmanage_cmd()
             .args([
@@ -430,6 +432,14 @@ impl VmProviderTrait for VirtualBoxProvider {
             .output()
             .context("Failed to capture screenshot")?;
         
+        info!("VBoxManage screenshotpng exit code: {}", output.status);
+        if !output.stdout.is_empty() {
+            info!("VBoxManage stdout: {}", String::from_utf8_lossy(&output.stdout));
+        }
+        if !output.stderr.is_empty() {
+            info!("VBoxManage stderr: {}", String::from_utf8_lossy(&output.stderr));
+        }
+        
         if !output.status.success() {
             return Err(anyhow!("Failed to capture screenshot: {}", 
                 String::from_utf8_lossy(&output.stderr)));
@@ -438,11 +448,26 @@ impl VmProviderTrait for VirtualBoxProvider {
         // Wait a moment for the file to be written
         sleep(Duration::from_millis(300)).await;
         
+        // Check if file exists and get its size
+        if let Ok(metadata) = std::fs::metadata(&screenshot_path) {
+            info!("Screenshot file created successfully. Size: {} bytes", metadata.len());
+            if metadata.len() == 0 {
+                warn!("Screenshot file is empty (0 bytes)");
+            }
+        } else {
+            warn!("Screenshot file was not created: {}", screenshot_path);
+        }
+        
+        info!("Loading screenshot image...");
         let image = image::open(&screenshot_path)
             .context("Failed to load screenshot image")?;
         
+        info!("Screenshot loaded: {}x{} pixels, format: {:?}", 
+              image.width(), image.height(), image.color());
+        
         // Clean up the temporary file
         let _ = std::fs::remove_file(&screenshot_path);
+        info!("=== VBOX SCREEN CAPTURE END ===");
         
         Ok(image)
     }

@@ -22,3 +22,4 @@ target/
 *.iso
 *.vdi
 /.claude
+*.png

@@ -69,6 +69,7 @@ uuid = { version = "1.6", features = ["v4"] }
 # Async traits
 async-trait = "0.1"
 image = "0.25.6"
+ocrs = "0.8.1"
 
 # Platform-specific dependencies
 [target.'cfg(unix)'.dependencies]
