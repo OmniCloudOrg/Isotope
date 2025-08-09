@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use image::DynamicImage;
+use image::{DynamicImage, GenericImageView};
 use tracing::{debug, info, trace, warn};
 use ocrs::{OcrEngine as OcrsEngine, OcrEngineParams, ImageSource, DecodeMethod, DimOrder};
 use rten_tensor::AsView;
@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use ring::digest;
 use tokio::sync::{mpsc, oneshot, broadcast};
 use async_trait::async_trait;
+use std::sync::LazyLock;
 
 use super::models::{load_model, ModelSource};
 
@@ -93,6 +94,59 @@ pub struct OcrEngine {
     change_rx: broadcast::Receiver<ScreenChangeEvent>,
     /// Sender for screen change events (kept for cloning)
     change_tx: broadcast::Sender<ScreenChangeEvent>,
+    /// Adaptive timeout tracking for OCR operations
+    timeout_tracker: Arc<RwLock<TimeoutTracker>>,
+}
+
+/// Tracks OCR timeouts and adapts timeout duration based on failure patterns
+#[derive(Debug, Clone)]
+struct TimeoutTracker {
+    /// Current timeout duration (starts at 10s, increases with failures)
+    current_timeout: Duration,
+    /// Number of consecutive timeout failures
+    consecutive_failures: u32,
+    /// Maximum timeout (30s)
+    max_timeout: Duration,
+    /// Base timeout (10s)
+    base_timeout: Duration,
+    /// Last successful OCR timestamp
+    last_success: Option<Instant>,
+}
+
+impl TimeoutTracker {
+    fn new() -> Self {
+        Self {
+            current_timeout: Duration::from_secs(10),
+            consecutive_failures: 0,
+            max_timeout: Duration::from_secs(30),
+            base_timeout: Duration::from_secs(10),
+            last_success: None,
+        }
+    }
+    
+    /// Record a successful OCR operation
+    fn record_success(&mut self) {
+        self.last_success = Some(Instant::now());
+        self.consecutive_failures = 0;
+        // Gradually reduce timeout back toward base timeout
+        if self.current_timeout > self.base_timeout {
+            let reduction = Duration::from_secs(2);
+            self.current_timeout = self.current_timeout.saturating_sub(reduction).max(self.base_timeout);
+        }
+    }
+    
+    /// Record a timeout failure and increase timeout for next attempt
+    fn record_timeout(&mut self) {
+        self.consecutive_failures += 1;
+        // Increase timeout: 10s -> 15s -> 20s -> 25s -> 30s (max)
+        let increase = Duration::from_secs(5 * self.consecutive_failures as u64);
+        self.current_timeout = (self.base_timeout + increase).min(self.max_timeout);
+    }
+    
+    /// Get current timeout duration
+    fn get_timeout(&self) -> Duration {
+        self.current_timeout
+    }
 }
 
 /// Default text detection model.
@@ -101,13 +155,24 @@ const DETECTION_MODEL: &str = "https://ocrs-models.s3-accelerate.amazonaws.com/t
 /// Default text recognition model.
 const RECOGNITION_MODEL: &str = "https://ocrs-models.s3-accelerate.amazonaws.com/text-recognition.rten";
 
+/// Cached model paths to avoid repeated downloads
+static CACHED_DETECTION_PATH: LazyLock<Result<std::path::PathBuf, anyhow::Error>> = LazyLock::new(|| {
+    info!("Downloading and caching text detection model...");
+    super::models::download_file(DETECTION_MODEL, None)
+});
+
+static CACHED_RECOGNITION_PATH: LazyLock<Result<std::path::PathBuf, anyhow::Error>> = LazyLock::new(|| {
+    info!("Downloading and caching text recognition model...");
+    super::models::download_file(RECOGNITION_MODEL, None)
+});
+
 impl OcrEngine {
     pub fn new() -> Self {
-        Self::with_options(false, Duration::from_millis(500))
+        Self::with_options(false, Duration::from_millis(100))
     }
     
     pub fn with_beam_search() -> Self {
-        Self::with_options(true, Duration::from_millis(500))
+        Self::with_options(true, Duration::from_millis(100))
     }
     
     pub fn with_update_threshold(threshold: Duration) -> Self {
@@ -115,23 +180,26 @@ impl OcrEngine {
     }
     
     fn with_options(beam_search: bool, update_threshold: Duration) -> Self {
-        info!("Initializing enhanced OCR engine using ocrs with pre-trained models");
+        debug!("Initializing enhanced OCR engine using cached pre-trained models");
         
-        // Load detection model
-        info!("Loading text detection model...");
-        let detection_model_src = ModelSource::Url(DETECTION_MODEL.to_string());
-        let detection_model = load_model(detection_model_src)
-            .expect("Failed to load text detection model");
+        // Use cached model paths to avoid repeated downloads, but still load models fresh
+        let detection_binding = CACHED_DETECTION_PATH.as_ref();
+        let detection_path = detection_binding
+            .as_ref()
+            .expect("Failed to get cached detection model path");
+        let recognition_binding = CACHED_RECOGNITION_PATH.as_ref();
+        let recognition_path = recognition_binding
+            .as_ref()
+            .expect("Failed to get cached recognition model path");
         
-        // Load recognition model
-        info!("Loading text recognition model...");
-        let recognition_model_src = ModelSource::Url(RECOGNITION_MODEL.to_string());
-        let recognition_model = load_model(recognition_model_src)
-            .expect("Failed to load text recognition model");
+        let detection_model = load_model(ModelSource::Path(detection_path.to_string_lossy().to_string()))
+            .expect("Failed to load detection model from cached path");
+        let recognition_model = load_model(ModelSource::Path(recognition_path.to_string_lossy().to_string()))
+            .expect("Failed to load recognition model from cached path");
         
         // Create OCR engine with enhanced parameters
         let decode_method = if beam_search {
-            DecodeMethod::BeamSearch { width: 100 }
+            DecodeMethod::BeamSearch { width: 500 }
         } else {
             DecodeMethod::Greedy
         };
@@ -149,7 +217,7 @@ impl OcrEngine {
         let engine = OcrsEngine::new(engine_params)
             .expect("Failed to initialize OCR engine");
         
-        info!("OCR engine initialized with enhanced models and {} decoding", 
+        debug!("OCR engine initialized with cached models and {} decoding", 
               if beam_search { "beam search" } else { "greedy" });
         
         // Create channels for background monitoring
@@ -162,6 +230,7 @@ impl OcrEngine {
             monitor_tx: None,
             change_rx,
             change_tx,
+            timeout_tracker: Arc::new(RwLock::new(TimeoutTracker::new())),
         }
     }
     
@@ -175,7 +244,9 @@ impl OcrEngine {
     /// Check if the current cached state is still valid for this image
     fn is_state_current(&self, image_hash: &str) -> bool {
         if let Some(state) = self.screen_state.read().as_ref() {
-            state.image_hash == image_hash && !state.is_stale(self.update_threshold)
+            // Only use cache if image hash matches AND it's very recent (less than 200ms)
+            // This makes caching less aggressive so we see more OCR processing
+            state.image_hash == image_hash && !state.is_stale(Duration::from_millis(200))
         } else {
             false
         }
@@ -211,61 +282,132 @@ impl OcrEngine {
     }
     
     pub async fn extract_text(&self, image: &DynamicImage) -> Result<String> {
-        trace!("Extracting text using ocrs ML-based OCR with screen state caching");
+        let start_time = Instant::now();
+        debug!("OCR extract_text called");
         
         // Check if we can use cached screen state
         let image_hash = self.hash_image(image);
         if self.is_state_current(&image_hash) {
             let cached_text = self.screen_state.read().as_ref().unwrap().text.clone();
-            trace!("Using cached screen state: '{}'", cached_text);
+            debug!("OCR cache hit ({}ms) - using recent screen state: '{}'", start_time.elapsed().as_millis(), cached_text);
             return Ok(cached_text);
         }
         
-        // Convert to RGB format for ocrs
+        debug!("OCR cache miss - performing fresh text extraction");
+        
+        // Get current timeout duration
+        let timeout_duration = self.timeout_tracker.read().get_timeout();
+        debug!("Using OCR timeout of {}s", timeout_duration.as_secs());
+        
+        // Wrap OCR processing in timeout
+        match tokio::time::timeout(timeout_duration, self.extract_text_internal(image, image_hash.clone())).await {
+            Ok(Ok(text)) => {
+                // Success - record it and return result
+                self.timeout_tracker.write().record_success();
+                if !text.is_empty() {
+                    info!("OCR SUCCESS with {}s timeout ({}ms): '{}'", 
+                          timeout_duration.as_secs(), start_time.elapsed().as_millis(), text);
+                }
+                Ok(text)
+            }
+            Ok(Err(e)) => {
+                // OCR error (not timeout)
+                warn!("OCR processing error: {}", e);
+                Err(e)
+            }
+            Err(_) => {
+                // Timeout occurred
+                self.timeout_tracker.write().record_timeout();
+                let new_timeout = self.timeout_tracker.read().get_timeout();
+                warn!("OCR timed out after {}s, next timeout will be {}s", 
+                      timeout_duration.as_secs(), new_timeout.as_secs());
+                
+                // Return empty result to allow system to try next frame
+                let empty_state = ScreenState {
+                    text: String::new(),
+                    image_hash,
+                    timestamp: Instant::now(),
+                    black_percentage: 0,
+                    white_percentage: 0,
+                    dimensions: image.dimensions(),
+                };
+                self.update_screen_state(empty_state);
+                Ok(String::new())
+            }
+        }
+    }
+    
+    /// Internal OCR processing without timeout wrapper
+    async fn extract_text_internal(&self, image: &DynamicImage, image_hash: String) -> Result<String> {
+        // Convert to RGB format for ocrs (reuse existing if possible)
         let rgb_image = image.to_rgb8();
         let (width, height) = rgb_image.dimensions();
         
-        trace!("=== SCREEN CAPTURE ANALYSIS ===");
-        trace!("Image dimensions: {}x{}", width, height);
-        trace!("Image format: {:?}", image.color());
-        trace!("RGB image raw data length: {} bytes", rgb_image.as_raw().len());
+        debug!("Processing {}x{} image", width, height);
         
-        // Check if image is completely black or white (common issues)
+        // Fast pixel analysis using sampling for better performance
         let pixel_data = rgb_image.as_raw();
         let total_pixels = (width * height) as usize;
+        
+        // Ultra-fast sampling: every 500th pixel for maximum speed
+        let sample_size = (total_pixels / 500).max(200); // At least 200 samples
+        let step = (total_pixels / sample_size).max(1);
+        
         let mut black_pixels = 0;
         let mut white_pixels = 0;
+        let mut sample_count = 0;
         
-        for chunk in pixel_data.chunks_exact(3) {
-            if chunk[0] == 0 && chunk[1] == 0 && chunk[2] == 0 {
-                black_pixels += 1;
-            } else if chunk[0] == 255 && chunk[1] == 255 && chunk[2] == 255 {
-                white_pixels += 1;
+        for i in (0..pixel_data.len()).step_by(step * 3) {
+            if i + 2 < pixel_data.len() {
+                let r = pixel_data[i];
+                let g = pixel_data[i + 1];
+                let b = pixel_data[i + 2];
+                
+                if r == 0 && g == 0 && b == 0 {
+                    black_pixels += 1;
+                } else if r == 255 && g == 255 && b == 255 {
+                    white_pixels += 1;
+                }
+                sample_count += 1;
             }
         }
         
-        let black_percentage = (black_pixels * 100) / total_pixels;
-        let white_percentage = (white_pixels * 100) / total_pixels;
+        let black_percentage = (black_pixels * 100) / sample_count.max(1);
+        let white_percentage = (white_pixels * 100) / sample_count.max(1);
 
-        trace!("Image analysis: {}% black pixels, {}% white pixels", black_percentage, white_percentage);
-
+        debug!("Fast pixel analysis: {}% black, {}% white (sampled {} pixels)", 
+               black_percentage, white_percentage, sample_count);
+        
+        // Fast-path for obviously empty screens - skip expensive OCR
         if black_percentage > 95 {
-            trace!("Image is {}% black - screen capture may be blank/failed", black_percentage);
+            debug!("Fast-path: predominantly black screen ({}%), skipping OCR", black_percentage);
+            let empty_state = ScreenState {
+                text: String::new(),
+                image_hash,
+                timestamp: Instant::now(),
+                black_percentage,
+                white_percentage,
+                dimensions: (width, height),
+            };
+            self.update_screen_state(empty_state);
+            debug!("Fast-path: empty black screen detected");
+            return Ok(String::new());
         }
+        
         if white_percentage > 95 {
-            trace!("Image is {}% white - screen may be blank or not displaying content", white_percentage);
+            debug!("Fast-path: predominantly white screen ({}%), skipping OCR", white_percentage);
+            let empty_state = ScreenState {
+                text: String::new(),
+                image_hash,
+                timestamp: Instant::now(),
+                black_percentage,
+                white_percentage,
+                dimensions: (width, height),
+            };
+            self.update_screen_state(empty_state);
+            debug!("Fast-path: empty white screen detected");
+            return Ok(String::new());
         }
-        
-        // Save a copy of the screenshot for debugging 
-        let debug_path = format!("debug-screenshot-{}.png", std::process::id());
-        if let Err(e) = image.save(&debug_path) {
-            warn!("Failed to save debug screenshot: {}", e);
-        } else {
-            trace!("Saved debug screenshot to: {} ({}% black, {}% white)", 
-                  debug_path, black_percentage, white_percentage);
-        }
-        
-        trace!("===============================");
         
         // Convert image to tensor format for ocrs 0.10.4
         let in_chans = 3;
@@ -282,56 +424,38 @@ impl OcrEngine {
         let ocr_input = self.engine.prepare_input(img_source)
             .context("Failed to prepare OCR input")?;
         
-        // Step 1: Detect word rectangles - handle failures gracefully
-        trace!("OCR Step 1: Detecting words...");
+        // Ultra-fast OCR processing - optimized single-pass approach
+        trace!("Starting optimized OCR processing...");
+        
+        // Try fast approach: detect words then immediately recognize (skip line finding)
         let word_rects = match self.engine.detect_words(&ocr_input) {
-            Ok(rects) => {
-                trace!("OCR detected {} word regions", rects.len());
-                if rects.is_empty() {
-                    trace!("Word detection succeeded but found no text regions. Image may be blank or text-free.");
-                }
-                rects
-            }
+            Ok(rects) => rects,
             Err(e) => {
-                trace!("OCR word detection failed: {}. This can happen with dark screens, BIOS, boot screens, or low-contrast images.", e);
-                trace!("Continuing with fallback text recognition approaches");
-                Vec::new()
+                trace!("Word detection failed: {}", e);
+                return Ok(String::new()); // Exit early if detection fails
             }
-        };
-
-        // Step 2: Find text lines from word rectangles
-        trace!("OCR Step 2: Finding text lines...");
-        let line_rects = if word_rects.is_empty() {
-            trace!("No word regions available. Using basic image regions for text detection.");
-            Vec::new()
-        } else {
-            self.engine.find_text_lines(&ocr_input, &word_rects)
-        };
-
-        trace!("OCR found {} text lines", line_rects.len());
-
-        // Step 3: Recognize text
-        trace!("OCR Step 3: Recognizing text...");
-        let line_texts = if !line_rects.is_empty() {
-            // Normal case: recognize text in detected lines
-            match self.engine.recognize_text(&ocr_input, &line_rects) {
-                Ok(texts) => {
-                    let successful_recognitions = texts.iter().filter(|t| t.is_some()).count();
-                    trace!("Successfully recognized text in {}/{} detected lines", 
-                          successful_recognitions, texts.len());
-                    texts
-                }
-                Err(e) => {
-                    warn!("Text recognition failed on detected lines: {}. This may indicate corrupted models or unsupported text format.", e);
-                    Vec::new()
-                }
-            }
-        } else {
-            trace!("No text lines detected. This is normal for screens with minimal text (BIOS, boot screens, etc.)");
-            Vec::new()
         };
         
-        trace!("OCR recognition returned {} results", line_texts.len());
+        if word_rects.is_empty() {
+            trace!("No words detected");
+            return Ok(String::new());
+        }
+        
+        // Use traditional line-based approach but optimize it
+        let line_rects = self.engine.find_text_lines(&ocr_input, &word_rects);
+        
+        if line_rects.is_empty() {
+            trace!("No text lines found");
+            return Ok(String::new());
+        }
+        
+        let line_texts = match self.engine.recognize_text(&ocr_input, &line_rects) {
+            Ok(texts) => texts,
+            Err(e) => {
+                trace!("Text recognition failed: {}", e);
+                return Ok(String::new());
+            }
+        };
         
         // Combine all recognized text with better filtering and formatting
         let extracted_text = line_texts
@@ -350,39 +474,10 @@ impl OcrEngine {
             .join(" ");
         
         if !extracted_text.is_empty() {
-            info!("OCR successfully extracted text: '{}'", extracted_text);
+            debug!("OCR text extraction completed: '{}'", extracted_text);
         } else {
-            debug!("OCR completed but no readable text was found");
-        }
-        
-        // Provide detailed debugging information
-        if extracted_text.is_empty() {
-            if black_percentage > 90 {
-                trace!("No text detected on predominantly black screen ({}% black). This is normal for:", black_percentage);
-                trace!("  - Boot screens, BIOS menus, or splash screens");
-                trace!("  - VM startup before OS loads");
-                trace!("  - Blank or powered-off displays");
-            } else if white_percentage > 90 {
-                trace!("No text detected on predominantly white screen ({}% white). Possible scenarios:", white_percentage);
-                trace!("  - Blank document or empty desktop");
-                trace!("  - Screen saver or locked screen");
-                trace!("  - Application with minimal UI");
-            } else {
-                trace!("No text detected despite screen content ({}% black, {}% white).", black_percentage, white_percentage);
-                trace!("This could indicate:");
-                trace!("  - Text in unsupported format/language");
-                trace!("  - Very low contrast or stylized text");
-                trace!("  - Graphics-heavy interface with minimal text");
-                trace!("  - OCR model limitations with this content type");
-            }
-        } else {
-            trace!("=== OCR SUCCESS - TEXT DETECTED ===");
-            trace!("Extracted text: '{}'", extracted_text);
-            trace!("Statistics: {} chars, {} words", 
-                  extracted_text.len(), 
-                  extracted_text.split_whitespace().count());
-            trace!("Screen: {}% black, {}% white", black_percentage, white_percentage);
-            trace!("===================================");
+            debug!("OCR completed but no text found ({}% black, {}% white)", 
+                  black_percentage, white_percentage);
         }
         
         // Update the cached screen state
@@ -649,17 +744,33 @@ impl OcrEngine {
                 _ = tokio::time::sleep(if is_paused { Duration::from_secs(1) } else { interval }) => {
                     if !is_paused {
                         // Perform screen capture and OCR
+                        debug!("Background monitor performing screen check (update #{})", total_updates + 1);
                         match Self::monitor_screen_update(&engine, &capture, &screen_state, &change_tx, update_threshold).await {
                             Ok(updated) => {
                                 if updated {
                                     total_updates += 1;
                                     last_update = Some(Instant::now());
+                                    info!("Background monitor detected screen change #{} - updated state", total_updates);
+                                } else {
+                                    debug!("Background monitor found no screen changes");
                                 }
                             }
                             Err(e) => {
                                 warn!("Background screen monitoring error: {}", e);
                                 // Continue monitoring despite errors
                             }
+                        }
+                        
+                        // Provide periodic status updates
+                        if total_updates % 10 == 0 && total_updates > 0 {
+                            let current_text = {
+                                let guard = screen_state.read();
+                                guard.as_ref()
+                                    .map(|s| s.text.clone())
+                                    .unwrap_or_else(|| "(no state)".to_string())
+                            };
+                            info!("Background monitor status: {} updates, current screen: '{}'", 
+                                  total_updates, current_text);
                         }
                     }
                 }
@@ -697,9 +808,11 @@ impl OcrEngine {
         };
         
         if !needs_update {
-            trace!("Screen unchanged, skipping OCR");
+            debug!("Background monitor: screen unchanged, skipping OCR");
             return Ok(false);
         }
+        
+        debug!("Background monitor: screen changed, performing OCR");
         
         // Perform OCR
         let (width, height) = rgb_image.dimensions();
@@ -790,7 +903,7 @@ impl OcrEngine {
             };
             
             let _ = change_tx.send(event);
-            trace!("Screen state updated: '{}' ({}x{})", new_state.text, width, height);
+            info!("Background monitor extracted: '{}' ({}x{})", new_state.text, width, height);
         }
         
         Ok(has_changed)

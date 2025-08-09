@@ -31,7 +31,7 @@ fn filename_from_url(url: &str) -> Option<String> {
 
 /// Download a file from `url` to a local cache, if not already fetched, and
 /// return the path to the local file.
-fn download_file(url: &str, filename: Option<&str>) -> Result<PathBuf, anyhow::Error> {
+pub fn download_file(url: &str, filename: Option<&str>) -> Result<PathBuf, anyhow::Error> {
     let cache_dir = cache_dir()?;
     let filename = match filename {
         Some(fname) => fname.to_string(),

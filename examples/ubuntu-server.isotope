@@ -29,74 +29,67 @@ WAIT 10s
 
 ## Wait for the installer to fully load and show language selection
 # Look for a more unique phrase or full prompt
-WAIT 90s FOR "select your language"  # Use full prompt if possible
+WAIT 90s FOR "Welcome!"  # Use full prompt if possible
 
 # Language selection screen - usually defaults to English
 PRESS enter
 WAIT 5s
 
 # Installer update available
-WAIT 10s FOR "release notes for each version"  # Use full prompt if possible
+WAIT 10s FOR "Installer update"  # Use full prompt if possible
 PRESS enter
 
 ## Keyboard layout selection
 # Look for a more unique phrase or full prompt
-WAIT 10s FOR "Keyboard configuration"  # Use full prompt if possible
+WAIT 10s FOR "keyboard layout below"  # Use full prompt if possible
 PRESS enter
 WAIT 3s
-# Confirm keyboard layout
+
+# Choose they type of the installation
+WAIT 5s FOR "Choose the base for the installation"
 PRESS enter
-WAIT 5s
 
 ## Network configuration - wait for network detection
 # Look for a more unique phrase or full prompt
 
-WAIT 15s FOR "Configure the network"  # Use full prompt if possible
+WAIT 15s FOR "one interface this server can use"  # Use full prompt if possible
 # Usually auto-configured, just continue
 PRESS enter
 WAIT 10s
 
 ## Proxy configuration - skip if no proxy
 # Look for a more unique phrase or full prompt
-WAIT 10s FOR "Configure proxy"  # Use full prompt if possible
+WAIT 10s FOR "Proxy address"  # Use full prompt if possible
 PRESS enter
 WAIT 5s
 
 ## Mirror configuration - use default Ubuntu mirrors
 # Look for a more unique phrase or full prompt
-WAIT 10s FOR "Ubuntu archive mirror"  # Use full prompt if possible
+WAIT 10s FOR "Mirror address"
+WAIT 20s FOR "location passed tests"
 PRESS enter
 WAIT 15s
 
 ## Guided storage configuration - wait for disk detection
 # Look for a more unique phrase or full prompt
-WAIT 20s FOR "Guided storage configuration"  # Use full prompt if possible
+WAIT 20s FOR "storage layout"  # Use full prompt if possible
+PRESS down
+PRESS down
+PRESS down
+PRESS down
+PRESS down
 # Use entire disk (usually default option)
 PRESS enter
-WAIT 5s
+WAIT 1s
 # Confirm storage layout
 PRESS enter
-WAIT 10s
-
-## Storage configuration - continue with default
-WAIT 10s FOR "Storage configuration"  # Use full prompt if possible
+WAIT 1s
+PRESS down
+WAIT 1s
 PRESS enter
-WAIT 5s
-
-## Confirm destructive action
-WAIT 10s FOR "Confirm destructive action"
-PRESS tab
-PRESS enter
-WAIT 5s
-
-## Destructive action confirmation
-WAIT 5s FOR "This will destroy all data on the selected disks"
-PRESS tab
-PRESS enter
-WAIT 10s
 
 ## Profile setup - wait for user creation screen
-WAIT 15s FOR "Profile setup"
+WAIT 15s FOR "Enter the username and password"
 TYPE ubuntu
 PRESS tab
 TYPE ubuntu-server

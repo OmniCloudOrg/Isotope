@@ -24,3 +24,5 @@ target/
 /.claude
 *.png
 /ocrs-cli
+.claude/settings.local.json
+/.claude
