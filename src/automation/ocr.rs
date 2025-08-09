@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use image::DynamicImage;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 use ocrs::{OcrEngine as OcrsEngine, OcrEngineParams, ImageSource, DecodeMethod, DimOrder};
 use rten_tensor::AsView;
 
@@ -67,16 +67,16 @@ impl OcrEngine {
     }
     
     pub async fn extract_text(&self, image: &DynamicImage) -> Result<String> {
-        debug!("Extracting text using ocrs ML-based OCR");
+        trace!("Extracting text using ocrs ML-based OCR");
         
         // Convert to RGB format for ocrs
         let rgb_image = image.to_rgb8();
         let (width, height) = rgb_image.dimensions();
         
-        info!("=== SCREEN CAPTURE ANALYSIS ===");
-        info!("Image dimensions: {}x{}", width, height);
-        info!("Image format: {:?}", image.color());
-        info!("RGB image raw data length: {} bytes", rgb_image.as_raw().len());
+        trace!("=== SCREEN CAPTURE ANALYSIS ===");
+        trace!("Image dimensions: {}x{}", width, height);
+        trace!("Image format: {:?}", image.color());
+        trace!("RGB image raw data length: {} bytes", rgb_image.as_raw().len());
         
         // Check if image is completely black or white (common issues)
         let pixel_data = rgb_image.as_raw();
@@ -98,10 +98,10 @@ impl OcrEngine {
         info!("Image analysis: {}% black pixels, {}% white pixels", black_percentage, white_percentage);
         
         if black_percentage > 95 {
-            warn!("Image is {}% black - screen capture may be blank/failed", black_percentage);
+            trace!("Image is {}% black - screen capture may be blank/failed", black_percentage);
         }
         if white_percentage > 95 {
-            warn!("Image is {}% white - screen may be blank or not displaying content", white_percentage);
+            trace!("Image is {}% white - screen may be blank or not displaying content", white_percentage);
         }
         
         // Save a copy of the screenshot for debugging 
@@ -109,11 +109,11 @@ impl OcrEngine {
         if let Err(e) = image.save(&debug_path) {
             warn!("Failed to save debug screenshot: {}", e);
         } else {
-            info!("Saved debug screenshot to: {} ({}% black, {}% white)", 
+            trace!("Saved debug screenshot to: {} ({}% black, {}% white)", 
                   debug_path, black_percentage, white_percentage);
         }
         
-        info!("===============================");
+        trace!("===============================");
         
         // Convert image to tensor format for ocrs 0.10.4
         let in_chans = 3;
