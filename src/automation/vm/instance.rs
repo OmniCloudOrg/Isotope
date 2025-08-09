@@ -13,7 +13,7 @@ pub struct VmInstance {
     pub iso_path: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum VmProvider {
     Qemu,
     VirtualBox,

@@ -6,7 +6,7 @@ use tokio::time::{sleep, timeout};
 use tracing::{debug, info, warn};
 
 use crate::automation::keypress::{KeypressExecutor, KeypressAction};
-use crate::automation::vm::VmInstance;
+use crate::automation::vm::{VmInstance, VmManager};
 use crate::config::{Instruction, Stage};
 use crate::utils::template::TemplateEngine;
 
@@ -25,7 +25,7 @@ impl PuppetManager {
         }
     }
 
-    pub async fn execute_stage_instructions(&mut self, vm: &VmInstance, stage: &Stage) -> Result<()> {
+    pub async fn execute_stage_instructions(&mut self, vm: &VmInstance, stage: &Stage, vm_manager: &VmManager) -> Result<()> {
         info!("Executing puppet instructions for stage: {:?}", stage.name);
 
         for (i, instruction) in stage.instructions.iter().enumerate() {
@@ -37,10 +37,10 @@ impl PuppetManager {
                     self.execute_wait_instruction(vm, duration, condition.as_ref()).await?;
                 }
                 Instruction::Press { key, repeat } => {
-                    self.execute_press_instruction(vm, key, *repeat).await?;
+                    self.execute_press_instruction(vm, key, *repeat, vm_manager).await?;
                 }
                 Instruction::Type { text } => {
-                    self.execute_type_instruction(vm, text).await?;
+                    self.execute_type_instruction(vm, text, vm_manager).await?;
                 }
                 
                 // OS Configuration instructions (live OS commands)
@@ -91,7 +91,7 @@ impl PuppetManager {
         Ok(())
     }
 
-    async fn execute_press_instruction(&mut self, vm: &VmInstance, key: &str, repeat: Option<u32>) -> Result<()> {
+    async fn execute_press_instruction(&mut self, vm: &VmInstance, key: &str, repeat: Option<u32>, vm_manager: &VmManager) -> Result<()> {
         let repeat_count = repeat.unwrap_or(1);
         
         for i in 0..repeat_count {
@@ -102,7 +102,7 @@ impl PuppetManager {
             }
             
             let action = self.parse_key_action(key)?;
-            self.keypress_executor.execute_action(vm, &action).await?;
+            self.keypress_executor.execute_action(vm, &action, vm_manager).await?;
             
             // Small delay between repeated keypresses
             if i < repeat_count - 1 {
@@ -113,14 +113,14 @@ impl PuppetManager {
         Ok(())
     }
 
-    async fn execute_type_instruction(&mut self, vm: &VmInstance, text: &str) -> Result<()> {
+    async fn execute_type_instruction(&mut self, vm: &VmInstance, text: &str, vm_manager: &VmManager) -> Result<()> {
         // Process template variables in text
         let processed_text = self.template_engine.render_string(text, &self.environment_vars)?;
         
         debug!("Typing text: {}", processed_text);
         
         let action = KeypressAction::TypeText(processed_text);
-        self.keypress_executor.execute_action(vm, &action).await?;
+        self.keypress_executor.execute_action(vm, &action, vm_manager).await?;
 
         Ok(())
     }

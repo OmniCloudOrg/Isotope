@@ -143,7 +143,7 @@ impl Builder {
 
             // Execute puppet automation
             let mut puppet_manager = self.puppet_manager.lock().await;
-            puppet_manager.execute_stage_instructions(&vm_instance, os_install_stage).await
+            puppet_manager.execute_stage_instructions(&vm_instance, os_install_stage, &vm_manager).await
                 .context("Failed to execute OS installation instructions")?;
 
             // Wait for installation completion and shutdown VM
@@ -175,7 +175,7 @@ impl Builder {
 
             // Execute configuration instructions
             let mut puppet_manager = self.puppet_manager.lock().await;
-            puppet_manager.execute_stage_instructions(&vm_instance, os_configure_stage).await
+            puppet_manager.execute_stage_instructions(&vm_instance, os_configure_stage, &vm_manager).await
                 .context("Failed to execute OS configuration instructions")?;
 
             // Create live OS snapshot

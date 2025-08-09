@@ -14,6 +14,7 @@ pub struct VmManager {
     providers: HashMap<String, Box<dyn VmProviderTrait>>,
     working_dir: PathBuf,
     default_config: VmConfig,
+    configured_provider: VmProvider,
 }
 
 impl VmManager {
@@ -23,6 +24,7 @@ impl VmManager {
             providers: HashMap::new(),
             working_dir: std::env::temp_dir().join("isotope-vms"),
             default_config: VmConfig::default(),
+            configured_provider: VmProvider::Qemu, // Default to QEMU
         }
     }
 
@@ -84,6 +86,7 @@ impl VmManager {
         };
 
         info!("VM configured: {:?} with {}MB RAM, {} CPUs", provider, memory_mb, cpus);
+        self.configured_provider = provider;
         Ok(())
     }
 
@@ -94,7 +97,7 @@ impl VmManager {
         let instance = VmInstance::new(
             vm_id.clone(),
             vm_name,
-            VmProvider::Qemu, // Use configured provider from init stage
+            self.configured_provider,
             self.default_config.clone(),
         );
 

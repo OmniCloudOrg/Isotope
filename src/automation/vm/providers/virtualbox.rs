@@ -26,12 +26,34 @@ impl VirtualBoxProvider {
             Command::new("VBoxManage")
         }
     }
+
+    async fn vm_exists(&self, vm_name: &str) -> Result<bool> {
+        let output = self.vboxmanage_cmd()
+            .args(["list", "vms"])
+            .output()
+            .context("Failed to list VirtualBox VMs")?;
+
+        if !output.status.success() {
+            return Err(anyhow!("Failed to list VMs: {}", 
+                String::from_utf8_lossy(&output.stderr)));
+        }
+
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        Ok(output_str.contains(&format!("\"{}\"", vm_name)))
+    }
 }
 
 #[async_trait]
 impl VmProviderTrait for VirtualBoxProvider {
     async fn create_vm(&self, instance: &mut VmInstance) -> Result<()> {
         info!("Creating VirtualBox VM: {}", instance.name);
+
+        // Check if VM already exists
+        if self.vm_exists(&instance.name).await? {
+            info!("VirtualBox VM {} already exists, skipping creation", instance.name);
+            instance.set_state(VmState::Stopped);
+            return Ok(());
+        }
 
         // Create VM
         let output = self.vboxmanage_cmd()
@@ -136,6 +158,11 @@ impl VmProviderTrait for VirtualBoxProvider {
             return Ok(());
         }
 
+        // Ensure VM is created first
+        if !self.vm_exists(&instance.name).await? {
+            self.create_vm(instance).await?;
+        }
+
         instance.set_state(VmState::Starting);
 
         let output = self.vboxmanage_cmd()
@@ -227,6 +254,11 @@ impl VmProviderTrait for VirtualBoxProvider {
 
         if !iso_path.exists() {
             return Err(anyhow!("ISO file does not exist: {}", iso_path.display()));
+        }
+
+        // Ensure VM is created first
+        if !self.vm_exists(&instance.name).await? {
+            self.create_vm(instance).await?;
         }
 
         // Create IDE controller if it doesn't exist
@@ -391,6 +423,11 @@ impl VmProviderTrait for VirtualBoxProvider {
 
 impl VirtualBoxProvider {
     fn key_to_scancodes(&self, key: &str) -> Result<Vec<String>> {
+        // Handle key combinations like "ctrl+c"
+        if key.contains('+') {
+            return self.handle_key_combination(key);
+        }
+        
         let scancodes = match key.to_lowercase().as_str() {
             "enter" | "return" => vec!["1c", "9c"],
             "tab" => vec!["0f", "8f"],
@@ -412,9 +449,83 @@ impl VirtualBoxProvider {
             "f10" => vec!["44", "c4"],
             "f11" => vec!["57", "d7"],
             "f12" => vec!["58", "d8"],
+            // Character keys
+            "a" => vec!["1e", "9e"],
+            "b" => vec!["30", "b0"],
+            "c" => vec!["2e", "ae"],
+            "d" => vec!["20", "a0"],
+            "e" => vec!["12", "92"],
+            "f" => vec!["21", "a1"],
+            "g" => vec!["22", "a2"],
+            "h" => vec!["23", "a3"],
+            "i" => vec!["17", "97"],
+            "j" => vec!["24", "a4"],
+            "k" => vec!["25", "a5"],
+            "l" => vec!["26", "a6"],
+            "m" => vec!["32", "b2"],
+            "n" => vec!["31", "b1"],
+            "o" => vec!["18", "98"],
+            "p" => vec!["19", "99"],
+            "q" => vec!["10", "90"],
+            "r" => vec!["13", "93"],
+            "s" => vec!["1f", "9f"],
+            "t" => vec!["14", "94"],
+            "u" => vec!["16", "96"],
+            "v" => vec!["2f", "af"],
+            "w" => vec!["11", "91"],
+            "x" => vec!["2d", "ad"],
+            "y" => vec!["15", "95"],
+            "z" => vec!["2c", "ac"],
+            // Numbers
+            "0" => vec!["0b", "8b"],
+            "1" => vec!["02", "82"],
+            "2" => vec!["03", "83"],
+            "3" => vec!["04", "84"],
+            "4" => vec!["05", "85"],
+            "5" => vec!["06", "86"],
+            "6" => vec!["07", "87"],
+            "7" => vec!["08", "88"],
+            "8" => vec!["09", "89"],
+            "9" => vec!["0a", "8a"],
             _ => return Err(anyhow!("Unknown key for VirtualBox: {}", key)),
         };
 
         Ok(scancodes.into_iter().map(|s| s.to_string()).collect())
+    }
+
+    fn handle_key_combination(&self, combination: &str) -> Result<Vec<String>> {
+        let parts: Vec<&str> = combination.split('+').collect();
+        if parts.len() != 2 {
+            return Err(anyhow!("Invalid key combination format: {}", combination));
+        }
+
+        let modifier = parts[0].trim().to_lowercase();
+        let key = parts[1].trim().to_lowercase();
+
+        let mut scancodes = Vec::new();
+
+        // Add modifier press
+        let modifier_press = match modifier.as_str() {
+            "ctrl" | "control" => "1d",
+            "shift" => "2a",
+            "alt" => "38",
+            _ => return Err(anyhow!("Unknown modifier: {}", modifier)),
+        };
+        scancodes.push(modifier_press.to_string());
+
+        // Add key press and release
+        let key_scancodes = self.key_to_scancodes(&key)?;
+        scancodes.extend(key_scancodes);
+
+        // Add modifier release
+        let modifier_release = match modifier.as_str() {
+            "ctrl" | "control" => "9d",
+            "shift" => "aa", 
+            "alt" => "b8",
+            _ => return Err(anyhow!("Unknown modifier: {}", modifier)),
+        };
+        scancodes.push(modifier_release.to_string());
+
+        Ok(scancodes)
     }
 }

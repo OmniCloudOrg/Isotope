@@ -1,6 +1,6 @@
 # Ubuntu Server Live ISO with Docker
-FROM ./ubuntu-22.04-server.iso
-CHECKSUM sha256:a4acfda10b18da50e2ec50ccaf860d7f20ce1ee42895e3840b57b2b371fc734
+FROM ./ubuntu-22.04.5-live-server-amd64.iso
+#CHECKSUM sha256:a4acfda10b18da50e2ec50ccaf860d7f20ce1ee42895e3840b57b2b371fc734
 
 LABEL name="ubuntu-docker-server"
 LABEL version="1.0.0"
@@ -8,7 +8,7 @@ LABEL description="Ubuntu Server 22.04 with Docker pre-installed"
 
 # STAGE init - VM configuration for puppet automation
 STAGE init
-VM provider=qemu
+VM provider=virtualbox
 VM memory=4G
 VM cpus=2
 VM disk=20G
@@ -28,7 +28,8 @@ WAIT 1s
 PRESS enter
 
 # Network configuration
-WAIT 5s
+WAIT 5s FOR "Configuring network"
+
 PRESS enter
 
 # Proxy configuration
