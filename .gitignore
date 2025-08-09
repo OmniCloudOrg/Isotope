@@ -26,3 +26,4 @@ target/
 /ocrs-cli
 .claude/settings.local.json
 /.claude
+.isometa
