@@ -29,7 +29,7 @@ WAIT 10s
 
 ## Wait for the installer to fully load and show language selection
 # Look for a more unique phrase or full prompt
-WAIT 90s FOR "Please select your language"  # Use full prompt if possible
+WAIT 90s FOR "select uour language"  # Use full prompt if possible
 
 # Language selection screen - usually defaults to English
 PRESS enter

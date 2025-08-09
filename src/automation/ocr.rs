@@ -1,19 +1,67 @@
 use anyhow::{Context, Result};
 use image::DynamicImage;
 use tracing::{debug, info, warn};
-use ocrs::{OcrEngine as OcrsEngine, OcrEngineParams, ImageSource};
+use ocrs::{OcrEngine as OcrsEngine, OcrEngineParams, ImageSource, DecodeMethod, DimOrder};
+use rten_tensor::AsView;
+
+use super::models::{load_model, ModelSource};
 
 pub struct OcrEngine {
     engine: OcrsEngine,
 }
 
+/// Default text detection model.
+const DETECTION_MODEL: &str = "https://ocrs-models.s3-accelerate.amazonaws.com/text-detection.rten";
+
+/// Default text recognition model.
+const RECOGNITION_MODEL: &str = "https://ocrs-models.s3-accelerate.amazonaws.com/text-recognition.rten";
+
 impl OcrEngine {
     pub fn new() -> Self {
-        info!("Initializing OCR engine using ocrs (pure Rust ML-based OCR)");
+        Self::with_options(false)
+    }
+    
+    pub fn with_beam_search() -> Self {
+        Self::with_options(true)
+    }
+    
+    fn with_options(beam_search: bool) -> Self {
+        info!("Initializing enhanced OCR engine using ocrs with pre-trained models");
         
-        // Create OCR engine with default parameters (no external models needed)
-        let engine = OcrsEngine::new(OcrEngineParams::default())
+        // Load detection model
+        info!("Loading text detection model...");
+        let detection_model_src = ModelSource::Url(DETECTION_MODEL.to_string());
+        let detection_model = load_model(detection_model_src)
+            .expect("Failed to load text detection model");
+        
+        // Load recognition model
+        info!("Loading text recognition model...");
+        let recognition_model_src = ModelSource::Url(RECOGNITION_MODEL.to_string());
+        let recognition_model = load_model(recognition_model_src)
+            .expect("Failed to load text recognition model");
+        
+        // Create OCR engine with enhanced parameters
+        let decode_method = if beam_search {
+            DecodeMethod::BeamSearch { width: 100 }
+        } else {
+            DecodeMethod::Greedy
+        };
+        
+        let engine_params = OcrEngineParams {
+            detection_model: Some(detection_model),
+            recognition_model: Some(recognition_model),
+            decode_method,
+            debug: false,
+            alphabet: None,
+            allowed_chars: None,
+            ..Default::default()
+        };
+        
+        let engine = OcrsEngine::new(engine_params)
             .expect("Failed to initialize OCR engine");
+        
+        info!("OCR engine initialized with enhanced models and {} decoding", 
+              if beam_search { "beam search" } else { "greedy" });
         
         Self { engine }
     }
@@ -67,11 +115,16 @@ impl OcrEngine {
         
         info!("===============================");
         
+        // Convert image to tensor format for ocrs 0.10.4
+        let in_chans = 3;
+        let tensor = rten_tensor::NdTensor::from_data(
+            [height as usize, width as usize, in_chans],
+            rgb_image.into_vec(),
+        );
+        
         // Create image source for OCR
-        let img_source = ImageSource::from_bytes(
-            rgb_image.as_raw(), 
-            (width, height)
-        ).context("Failed to create image source")?;
+        let img_source = ImageSource::from_tensor(tensor.view(), DimOrder::Hwc)
+            .context("Failed to create image source")?;
         
         // Prepare input for OCR processing
         let ocr_input = self.engine.prepare_input(img_source)
@@ -82,13 +135,14 @@ impl OcrEngine {
         let word_rects = match self.engine.detect_words(&ocr_input) {
             Ok(rects) => {
                 info!("OCR detected {} word regions", rects.len());
+                if rects.is_empty() {
+                    warn!("Word detection succeeded but found no text regions. Image may be blank or text-free.");
+                }
                 rects
             }
             Err(e) => {
-                warn!("OCR word detection failed: {}. This is common with dark/low-contrast screens.", e);
-                info!("Skipping word detection and attempting direct text recognition");
-                
-                // Return empty vec to proceed with alternative approaches
+                warn!("OCR word detection failed: {}. This can happen with dark screens, BIOS, boot screens, or low-contrast images.", e);
+                info!("Continuing with fallback text recognition approaches");
                 Vec::new()
             }
         };
@@ -104,56 +158,79 @@ impl OcrEngine {
         
         info!("OCR found {} text lines", line_rects.len());
         
-        // Step 3: Recognize text - if we have no lines, still attempt recognition on full image
+        // Step 3: Recognize text
         info!("OCR Step 3: Recognizing text...");
         let line_texts = if !line_rects.is_empty() {
             // Normal case: recognize text in detected lines
             match self.engine.recognize_text(&ocr_input, &line_rects) {
-                Ok(texts) => texts,
+                Ok(texts) => {
+                    let successful_recognitions = texts.iter().filter(|t| t.is_some()).count();
+                    info!("Successfully recognized text in {}/{} detected lines", 
+                          successful_recognitions, texts.len());
+                    texts
+                }
                 Err(e) => {
-                    warn!("Text recognition failed on detected lines: {}", e);
+                    warn!("Text recognition failed on detected lines: {}. This may indicate corrupted models or unsupported text format.", e);
                     Vec::new()
                 }
             }
         } else {
-            warn!("No text lines detected. Attempting basic text extraction...");
-            
-            // For cases where word/line detection fails (dark screens, etc.)
-            // Try alternative recognition approaches or return empty
-            // Note: ocrs might not support direct full-image recognition
-            // so we may need to return empty and handle this case
+            info!("No text lines detected. This is normal for screens with minimal text (BIOS, boot screens, etc.)");
             Vec::new()
         };
         
         info!("OCR recognition returned {} results", line_texts.len());
         
-        // Combine all recognized text
+        // Combine all recognized text with better filtering and formatting
         let extracted_text = line_texts
             .iter()
             .flatten()
-            .filter(|line| line.to_string().len() > 1) // Filter out very short detections
-            .map(|line| line.to_string())
+            .filter_map(|line| {
+                let text = line.to_string().trim().to_string();
+                // Filter out very short detections and noise
+                if text.len() > 1 && !text.chars().all(|c| c.is_whitespace()) {
+                    Some(text)
+                } else {
+                    None
+                }
+            })
             .collect::<Vec<String>>()
             .join(" ");
         
-        info!("OCR extracted text: '{}'", extracted_text);
+        if !extracted_text.is_empty() {
+            info!("OCR successfully extracted text: '{}'", extracted_text);
+        } else {
+            debug!("OCR completed but no readable text was found");
+        }
         
-        // Always dump what OCR sees for debugging
+        // Provide detailed debugging information
         if extracted_text.is_empty() {
             if black_percentage > 90 {
-                warn!("OCR found NO TEXT on screen. Screen is {}% black - likely at boot screen, BIOS, or blank display", black_percentage);
-                info!("This may be normal if VM is still booting or at a menu with minimal text");
+                info!("No text detected on predominantly black screen ({}% black). This is normal for:", black_percentage);
+                info!("  - Boot screens, BIOS menus, or splash screens");
+                info!("  - VM startup before OS loads");
+                info!("  - Blank or powered-off displays");
+            } else if white_percentage > 90 {
+                info!("No text detected on predominantly white screen ({}% white). Possible scenarios:", white_percentage);
+                info!("  - Blank document or empty desktop");
+                info!("  - Screen saver or locked screen");
+                info!("  - Application with minimal UI");
             } else {
-                warn!("OCR found NO TEXT but screen has only {}% black pixels - OCR may have failed", black_percentage);
-                info!("The screen has content but OCR couldn't extract text from it");
+                warn!("No text detected despite screen content ({}% black, {}% white).", black_percentage, white_percentage);
+                info!("This could indicate:");
+                info!("  - Text in unsupported format/language");
+                info!("  - Very low contrast or stylized text");
+                info!("  - Graphics-heavy interface with minimal text");
+                info!("  - OCR model limitations with this content type");
             }
         } else {
-            info!("=== WHAT OCR SEES ON SCREEN ===");
-            info!("Full extracted text: '{}'", extracted_text);
-            info!("Text length: {} characters", extracted_text.len());
-            info!("Word count: {} words", extracted_text.split_whitespace().count());
-            info!("Screen composition: {}% black, {}% white pixels", black_percentage, white_percentage);
-            info!("================================");
+            info!("=== OCR SUCCESS - TEXT DETECTED ===");
+            info!("Extracted text: '{}'", extracted_text);
+            info!("Statistics: {} chars, {} words", 
+                  extracted_text.len(), 
+                  extracted_text.split_whitespace().count());
+            info!("Screen: {}% black, {}% white", black_percentage, white_percentage);
+            info!("===================================");
         }
         
         Ok(extracted_text)
