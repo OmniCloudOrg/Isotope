@@ -498,6 +498,12 @@ impl VmProviderTrait for VirtualBoxProvider {
 
 impl VirtualBoxProvider {
     async fn configure_console_output(&self, instance: &VmInstance, output_file: &str) -> Result<()> {
+        // Check if VM is running - can't modify VM config while running
+        if self.is_running(instance).await? {
+            trace!("VM {} is running, skipping serial port configuration", instance.name);
+            return Ok(());
+        }
+        
         // Configure serial port 1 to output to file
         let configs = [
             ("--uart1", "0x3F8", "4"),

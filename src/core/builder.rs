@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn, debug};
 
-use crate::automation::{puppet::PuppetManager, vm::VmManager};
+use crate::automation::{puppet::PuppetManager, vm::{VmManager, VmInstance}};
 use crate::config::{IsotopeSpec, StageType};
 use crate::iso::{extractor::IsoExtractor, packager::IsoPackager};
 use crate::utils::{checksum::ChecksumVerifier, fs::FileSystemManager};
@@ -56,10 +56,10 @@ impl Builder {
         self.execute_init_stage().await?;
 
         // Step 3: Execute os_install stage (automated installation in VM)
-        self.execute_os_install_stage(&source_iso_path).await?;
+        let vm_instance = self.execute_os_install_stage(&source_iso_path).await?;
 
         // Step 4: Execute os_configure stage (live OS configuration)
-        self.execute_os_configure_stage().await?;
+        self.execute_os_configure_stage(vm_instance).await?;
 
         // Step 5: Execute pack stage (create final ISO)
         self.execute_pack_stage().await?;
@@ -126,7 +126,7 @@ impl Builder {
         Ok(())
     }
 
-    async fn execute_os_install_stage(&self, source_iso_path: &Path) -> Result<()> {
+    async fn execute_os_install_stage(&self, source_iso_path: &Path) -> Result<Option<VmInstance>> {
         info!("Executing os_install stage");
         
         if let Some(os_install_stage) = self.spec.get_stage(&StageType::OsInstall) {
@@ -146,28 +146,36 @@ impl Builder {
             puppet_manager.execute_stage_instructions(&vm_instance, os_install_stage, &vm_manager).await
                 .context("Failed to execute OS installation instructions")?;
 
+            Ok(Some(vm_instance))
         } else {
             warn!("No os_install stage found, skipping automated installation");
+            Ok(None)
         }
-
-        Ok(())
     }
 
-    async fn execute_os_configure_stage(&self) -> Result<()> {
+    async fn execute_os_configure_stage(&self, vm_instance: Option<VmInstance>) -> Result<()> {
         info!("Executing os_configure stage");
         
         if let Some(os_configure_stage) = self.spec.get_stage(&StageType::OsConfigure) {
-            // Start VM with installed OS (from previous stage)
             let mut vm_manager = self.vm_manager.lock().await;
-            let vm_instance = vm_manager.get_or_create_configured_vm()
-                .context("Failed to get configured VM")?;
+            
+            let vm_instance = if let Some(existing_instance) = vm_instance {
+                info!("Reusing VM instance from os_install stage: {}", existing_instance.name);
+                existing_instance
+            } else {
+                info!("No VM instance from os_install, creating new one");
+                let instance = vm_manager.get_or_create_configured_vm()
+                    .context("Failed to get configured VM")?;
+                
+                vm_manager.start_vm(&instance).await
+                    .context("Failed to start configured VM")?;
 
-            vm_manager.start_vm(&vm_instance).await
-                .context("Failed to start configured VM")?;
-
-            // Wait for OS boot
-            vm_manager.wait_for_boot(&vm_instance).await
-                .context("Failed to wait for OS boot")?;
+                // Wait for OS boot
+                vm_manager.wait_for_boot(&instance).await
+                    .context("Failed to wait for OS boot")?;
+                
+                instance
+            };
 
             // Execute configuration instructions
             let mut puppet_manager = self.puppet_manager.lock().await;
