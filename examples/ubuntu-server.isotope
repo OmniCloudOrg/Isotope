@@ -128,12 +128,13 @@ WAIT 5s
 # Ubuntu can show different completion messages, try common patterns
 WAIT 20m FOR "reboot now"  # More flexible pattern matching
 PRESS down
+PRESS down
 PRESS enter
 WAIT 30s
 
 ## Wait for reboot prompt
 # Look for a more unique phrase or full prompt
-WAIT 2m FOR "Please remove the installation medium, then press ENTER"  # Use full prompt if possible
+WAIT 2m FOR "then press ENTER"  # Use full prompt if possible
 PRESS enter
 
 # STAGE os_configure - Live OS configuration

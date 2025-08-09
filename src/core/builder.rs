@@ -146,10 +146,6 @@ impl Builder {
             puppet_manager.execute_stage_instructions(&vm_instance, os_install_stage, &vm_manager).await
                 .context("Failed to execute OS installation instructions")?;
 
-            // Wait for installation completion and shutdown VM
-            vm_manager.wait_for_shutdown(&vm_instance).await
-                .context("Failed to wait for VM shutdown")?;
-
         } else {
             warn!("No os_install stage found, skipping automated installation");
         }
