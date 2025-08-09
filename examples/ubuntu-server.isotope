@@ -130,7 +130,6 @@ WAIT 20m FOR "reboot now"  # More flexible pattern matching
 PRESS down
 PRESS down
 PRESS enter
-WAIT 30s
 
 ## Wait for reboot prompt
 # Look for a more unique phrase or full prompt
