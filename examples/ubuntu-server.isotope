@@ -17,111 +17,154 @@ VM timeout=30m
 
 # STAGE os_install - Automated OS installation keypresses
 STAGE os_install
-# Language selection screen
-WAIT 30s
+
+# Wait for Ubuntu Server to fully boot and show the installation menu
+# Ubuntu takes time to load kernel, initialize hardware, and start installer
+WAIT 2m FOR "Ubuntu Server"
+
+# Try to access boot menu or wait for automatic boot
+# If GRUB menu appears, select "Try or Install Ubuntu Server"
 PRESS enter
+WAIT 10s
+
+# Wait for the installer to fully load and show language selection
+# This can take 30-60 seconds depending on hardware
+WAIT 90s FOR "language"
+
+# Language selection screen - usually defaults to English
+PRESS enter
+WAIT 5s
 
 # Keyboard layout selection
+WAIT 10s FOR "keyboard"
+PRESS enter
 WAIT 3s
+# Confirm keyboard layout
 PRESS enter
-WAIT 1s
-PRESS enter
+WAIT 5s
 
-# Network configuration
-WAIT 5s FOR "Configuring network"
-
+# Network configuration - wait for network detection
+WAIT 15s FOR "network"
+# Usually auto-configured, just continue
 PRESS enter
+WAIT 10s
 
-# Proxy configuration
-WAIT 2s
+# Proxy configuration - skip if no proxy
+WAIT 10s FOR "proxy"
 PRESS enter
+WAIT 5s
 
-# Mirror configuration
-WAIT 3s
+# Mirror configuration - use default Ubuntu mirrors
+WAIT 10s FOR "mirror"
 PRESS enter
+WAIT 15s
 
-# Disk configuration
-WAIT 3s
-PRESS down
+# Storage configuration - wait for disk detection
+WAIT 20s FOR "storage"
+# Use entire disk (usually default option)
 PRESS enter
-WAIT 2s
+WAIT 5s
+# Confirm storage layout
 PRESS enter
+WAIT 10s
 
-# Storage confirmation
-WAIT 3s
+# Storage confirmation dialog
+WAIT 10s FOR "confirm"
 PRESS tab
 PRESS enter
+WAIT 5s
 
 # Destructive action confirmation
+WAIT 5s FOR "destructive"
+PRESS tab
+PRESS enter
+WAIT 10s
+
+# Profile setup - wait for user creation screen
+WAIT 15s FOR "profile"
+TYPE ubuntu
+PRESS tab
+TYPE ubuntu-server
+PRESS tab  
+TYPE ubuntu
+PRESS tab
+TYPE ubuntu
+PRESS tab
+TYPE ubuntu
+PRESS tab
+PRESS enter
+WAIT 10s
+
+# SSH setup
+WAIT 10s FOR "SSH"
+# Enable SSH server installation
+PRESS space
 WAIT 2s
 PRESS tab
 PRESS enter
-
-# User profile setup
 WAIT 10s
-TYPE ubuntu
-PRESS tab
-TYPE ubuntu
-PRESS tab
-TYPE ubuntu
-PRESS tab
-TYPE ubuntu
-PRESS tab
-TYPE ubuntu
+
+# Server snaps - skip additional packages for now
+WAIT 10s FOR "snaps"
 PRESS tab
 PRESS enter
+WAIT 5s
 
-# SSH setup
-WAIT 3s
-PRESS down
-PRESS space
-PRESS tab
+# Wait for installation to complete - this takes a long time
+WAIT 45m FOR "complete"
 PRESS enter
+WAIT 30s
 
-# Skip featured server snaps
-WAIT 3s
-PRESS tab
-PRESS enter
-
-# Wait for installation to complete
-WAIT 30m FOR "Installation complete!"
+# Wait for reboot prompt
+WAIT 2m FOR "reboot"
 PRESS enter
 
 # STAGE os_configure - Live OS configuration
 STAGE os_configure
-# Wait for login prompt
-WAIT 5m FOR login
-TYPE ubuntu
-PRESS enter
-WAIT 500ms
-TYPE ubuntu
-PRESS enter
-WAIT 3s
 
-# Update system
-RUN apt-get update
-RUN apt-get upgrade -y
+# Wait for system to reboot and show login prompt
+# After reboot, Ubuntu takes time to start all services
+WAIT 3m FOR "login"
+
+# Login with the ubuntu user we created
+TYPE ubuntu
+PRESS enter
+WAIT 2s
+TYPE ubuntu
+PRESS enter
+WAIT 5s
+
+# Wait for shell prompt to be ready
+WAIT 10s
+
+# Update system packages
+RUN sudo apt-get update
+RUN sudo apt-get upgrade -y
 
 # Install Docker
-RUN apt-get install -y docker.io
-RUN systemctl enable docker
-RUN systemctl start docker
-RUN usermod -aG docker ubuntu
+RUN sudo apt-get install -y docker.io
+RUN sudo systemctl enable docker
+RUN sudo systemctl start docker
+RUN sudo usermod -aG docker ubuntu
 
 # Install additional tools
-RUN apt-get install -y curl wget git vim htop
+RUN sudo apt-get install -y curl wget git vim htop neofetch
 
 # Copy custom configuration files
 COPY ./configs/docker-daemon.json /etc/docker/daemon.json
 COPY ./scripts/startup.sh /usr/local/bin/startup.sh
 
 # Make startup script executable and enable
-RUN chmod +x /usr/local/bin/startup.sh
-RUN ln -s /usr/local/bin/startup.sh /etc/rc.local
+RUN sudo chmod +x /usr/local/bin/startup.sh
+RUN sudo ln -s /usr/local/bin/startup.sh /etc/rc.local
 
 # Configure system settings
-RUN echo "export EDITOR=vim" >> /etc/profile
-RUN echo "alias ll='ls -la'" >> /etc/bash.bashrc
+RUN echo "export EDITOR=vim" | sudo tee -a /etc/profile
+RUN echo "alias ll='ls -la'" | sudo tee -a /etc/bash.bashrc
+
+# Configure Docker daemon
+RUN sudo systemctl restart docker
+RUN sudo systemctl status docker
 
 # STAGE pack - Create final bootable ISO
 STAGE pack
