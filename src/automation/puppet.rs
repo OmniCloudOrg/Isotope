@@ -1,12 +1,14 @@
 use anyhow::{anyhow, Context, Result};
+use clap::error;
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
-use tracing::{debug, info, warn};
+use tracing::{debug, info, warn, error};
 
 use crate::automation::keypress::{KeypressExecutor, KeypressAction};
 use crate::automation::vm::{VmInstance, VmManager};
+use crate::automation::ocr::OcrEngine;
 use crate::config::{Instruction, Stage};
 use crate::utils::template::TemplateEngine;
 
@@ -14,6 +16,7 @@ pub struct PuppetManager {
     keypress_executor: KeypressExecutor,
     template_engine: TemplateEngine,
     environment_vars: HashMap<String, String>,
+    ocr_engine: OcrEngine,
 }
 
 impl PuppetManager {
@@ -22,6 +25,7 @@ impl PuppetManager {
             keypress_executor: KeypressExecutor::new(),
             template_engine: TemplateEngine::new(),
             environment_vars: std::env::vars().collect(),
+            ocr_engine: OcrEngine::new(),
         }
     }
 
@@ -34,7 +38,7 @@ impl PuppetManager {
             match instruction {
                 // OS Installation instructions (keypress automation)
                 Instruction::Wait { duration, condition } => {
-                    self.execute_wait_instruction(vm, duration, condition.as_ref()).await?;
+                    self.execute_wait_instruction(vm, duration, condition.as_ref(), vm_manager).await?;
                 }
                 Instruction::Press { key, repeat } => {
                     self.execute_press_instruction(vm, key, *repeat, vm_manager).await?;
@@ -61,7 +65,7 @@ impl PuppetManager {
         Ok(())
     }
 
-    async fn execute_wait_instruction(&self, vm: &VmInstance, duration: &str, condition: Option<&String>) -> Result<()> {
+    async fn execute_wait_instruction(&self, vm: &VmInstance, duration: &str, condition: Option<&String>, vm_manager: &VmManager) -> Result<()> {
         let wait_duration = self.parse_duration(duration)?;
         
         if let Some(condition_text) = condition {
@@ -69,7 +73,7 @@ impl PuppetManager {
             
             // Wait with condition checking
             let result = timeout(wait_duration, async {
-                self.wait_for_condition(vm, condition_text).await
+                self.wait_for_condition(vm, condition_text, vm_manager).await
             }).await;
 
             match result {
@@ -80,7 +84,8 @@ impl PuppetManager {
                     return Err(anyhow!("Error while waiting for condition '{}': {}", condition_text, e));
                 }
                 Err(_) => {
-                    warn!("Timeout waiting for condition '{}', continuing anyway", condition_text);
+                    error!("Timeout waiting for condition '{}', assuming we made a mistake and halting execution", condition_text);
+                    return Err(anyhow!("Timeout waiting for condition '{}', assuming we made a mistake and halting execution", condition_text));
                 }
             }
         } else {
@@ -152,49 +157,165 @@ impl PuppetManager {
         Ok(())
     }
 
-    async fn wait_for_condition(&self, vm: &VmInstance, condition: &str) -> Result<()> {
+    async fn wait_for_condition(&self, vm: &VmInstance, condition: &str, vm_manager: &VmManager) -> Result<()> {
         // Parse different condition types
         match condition {
             text if text.contains("login") => {
-                self.wait_for_login_prompt(vm).await
+                self.wait_for_login_prompt(vm, vm_manager).await
             }
             text if text.contains("desktop") => {
-                self.wait_for_desktop(vm).await
+                self.wait_for_desktop(vm, vm_manager).await
             }
             pattern => {
-                self.wait_for_screen_text(vm, pattern).await
+                self.wait_for_screen_text(vm, pattern, vm_manager).await
             }
         }
     }
 
-    async fn wait_for_login_prompt(&self, vm: &VmInstance) -> Result<()> {
+    async fn wait_for_login_prompt(&self, vm: &VmInstance, vm_manager: &VmManager) -> Result<()> {
         info!("Waiting for login prompt on VM {}", vm.name);
         
-        // Implementation would monitor VM screen/console output for login prompt
-        // For now, just wait a fixed time as placeholder
-        sleep(Duration::from_secs(30)).await;
+        let max_attempts = 90; // Try for up to 3 minutes
+        let mut attempts = 0;
         
-        Ok(())
+        // Common login prompt patterns
+        let login_patterns = ["login:", "username:", "password:", "sign in", "log in"];
+        
+        while attempts < max_attempts {
+            attempts += 1;
+            debug!("Login prompt detection attempt {}/{}", attempts, max_attempts);
+            
+            // First try screen capture (this will catch graphical login screens)
+            if let Ok(image) = vm_manager.capture_screen(vm).await {
+                for pattern in &login_patterns {
+                    if let Ok(true) = self.ocr_engine.contains_text(&image, pattern).await {
+                        info!("Found login prompt pattern '{}' via screen capture", pattern);
+                        return Ok(());
+                    }
+                }
+                
+                // Also check for common visual login elements using OCR fallback patterns
+                if let Ok(text) = self.ocr_engine.extract_text(&image).await {
+                    let text_lower = text.to_lowercase();
+                    if text_lower.contains("login") || text_lower.contains("username") || 
+                       text_lower.contains("password") || text_lower.contains("sign in") {
+                        info!("Found login-related text via OCR");
+                        return Ok(());
+                    }
+                }
+            }
+            
+            // Also check console output (for text-based login prompts)
+            if let Ok(console_output) = vm_manager.get_console_output(vm).await {
+                let console_lower = console_output.to_lowercase();
+                for pattern in &login_patterns {
+                    if console_lower.contains(pattern) {
+                        info!("Found login prompt pattern '{}' in console output", pattern);
+                        return Ok(());
+                    }
+                }
+            }
+            
+            sleep(Duration::from_secs(2)).await;
+        }
+        
+        Err(anyhow!("Timeout waiting for login prompt on VM {}", vm.name))
     }
 
-    async fn wait_for_desktop(&self, vm: &VmInstance) -> Result<()> {
+    async fn wait_for_desktop(&self, vm: &VmInstance, vm_manager: &VmManager) -> Result<()> {
         info!("Waiting for desktop on VM {}", vm.name);
         
-        // Implementation would check for desktop environment via screen capture
-        // For now, just wait a fixed time as placeholder
-        sleep(Duration::from_secs(60)).await;
+        let max_attempts = 120; // Try for up to 4 minutes
+        let mut attempts = 0;
         
-        Ok(())
+        // Desktop environment patterns
+        let desktop_patterns = ["desktop", "taskbar", "start menu", "wallpaper"];
+        
+        while attempts < max_attempts {
+            attempts += 1;
+            debug!("Desktop detection attempt {}/{}", attempts, max_attempts);
+            
+            // Desktop environments are primarily graphical, so screen capture is essential
+            if let Ok(image) = vm_manager.capture_screen(vm).await {
+                // Use the OCR engine's desktop pattern detection
+                if let Ok(text) = self.ocr_engine.extract_text(&image).await {
+                    let text_lower = text.to_lowercase();
+                    
+                    // Check for desktop environment indicators
+                    for pattern in &desktop_patterns {
+                        if text_lower.contains(pattern) {
+                            info!("Found desktop pattern '{}' via OCR", pattern);
+                            return Ok(());
+                        }
+                    }
+                    
+                    // Look for common desktop elements
+                    if text_lower.contains("menu") || text_lower.contains("file") || 
+                       text_lower.contains("start") || text_lower.contains("time") ||
+                       text.contains("AM") || text.contains("PM") {
+                        info!("Found desktop environment indicators");
+                        return Ok(());
+                    }
+                }
+                
+                // Use OCR engine's built-in desktop pattern detection
+                if let Ok(true) = self.ocr_engine.contains_text(&image, "desktop").await {
+                    info!("OCR engine detected desktop environment");
+                    return Ok(());
+                }
+            }
+            
+            sleep(Duration::from_secs(2)).await;
+        }
+        
+        Err(anyhow!("Timeout waiting for desktop environment on VM {}", vm.name))
     }
 
-    async fn wait_for_screen_text(&self, vm: &VmInstance, pattern: &str) -> Result<()> {
+    async fn wait_for_screen_text(&self, vm: &VmInstance, pattern: &str, vm_manager: &VmManager) -> Result<()> {
         info!("Waiting for screen text '{}' on VM {}", pattern, vm.name);
         
-        // Implementation would use OCR or screen capture to detect text
-        // For now, just wait a fixed time as placeholder
-        sleep(Duration::from_secs(10)).await;
+        let max_attempts = 60; // Try for up to 60 attempts (about 2 minutes with delays)
+        let mut attempts = 0;
         
-        Ok(())
+        while attempts < max_attempts {
+            attempts += 1;
+            debug!("Screen text detection attempt {}/{}", attempts, max_attempts);
+            
+            // Capture the VM screen
+            match vm_manager.capture_screen(vm).await {
+                Ok(image) => {
+                    // Use OCR to detect text in the image
+                    match self.ocr_engine.contains_text(&image, pattern).await {
+                        Ok(true) => {
+                            info!("Found screen text '{}' on VM {} (attempt {})", pattern, vm.name, attempts);
+                            return Ok(());
+                        }
+                        Ok(false) => {
+                            debug!("Screen text '{}' not found yet (attempt {})", pattern, attempts);
+                        }
+                        Err(e) => {
+                            warn!("OCR error during screen text detection: {}", e);
+                            // Continue trying even if OCR fails - might be temporary issue
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to capture screen: {}", e);
+                    // Try console output as fallback
+                    if let Ok(console_output) = vm_manager.get_console_output(vm).await {
+                        if console_output.to_lowercase().contains(&pattern.to_lowercase()) {
+                            info!("Found pattern '{}' in console output", pattern);
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+            
+            // Wait before next attempt
+            sleep(Duration::from_secs(2)).await;
+        }
+        
+        Err(anyhow!("Timeout waiting for screen text '{}' on VM {}", pattern, vm.name))
     }
 
     async fn execute_remote_command(&self, vm: &VmInstance, command: &str) -> Result<()> {

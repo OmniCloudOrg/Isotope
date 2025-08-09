@@ -4,7 +4,8 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
+use image::DynamicImage;
 
 use crate::automation::vm::{VmInstance, VmState};
 use super::VmProviderTrait;
@@ -416,8 +417,122 @@ impl VmProviderTrait for VirtualBoxProvider {
         Ok(())
     }
 
+    async fn capture_screen(&self, instance: &VmInstance) -> Result<DynamicImage> {
+        debug!("Capturing screen from VirtualBox VM: {}", instance.name);
+
+        let screenshot_path = format!("{}-screenshot.png", instance.name);
+        
+        let output = self.vboxmanage_cmd()
+            .args([
+                "controlvm", &instance.name,
+                "screenshotpng", &screenshot_path
+            ])
+            .output()
+            .context("Failed to capture screenshot")?;
+        
+        if !output.status.success() {
+            return Err(anyhow!("Failed to capture screenshot: {}", 
+                String::from_utf8_lossy(&output.stderr)));
+        }
+        
+        // Wait a moment for the file to be written
+        sleep(Duration::from_millis(300)).await;
+        
+        let image = image::open(&screenshot_path)
+            .context("Failed to load screenshot image")?;
+        
+        // Clean up the temporary file
+        let _ = std::fs::remove_file(&screenshot_path);
+        
+        Ok(image)
+    }
+
+    async fn get_console_output(&self, instance: &VmInstance) -> Result<String> {
+        debug!("Getting console output from VirtualBox VM: {}", instance.name);
+        
+        // Check if VM has serial port configured for console output
+        let serial_file_path = format!("{}-console.log", instance.name);
+        
+        // First, ensure serial port is configured for this VM
+        self.configure_console_output(instance, &serial_file_path).await?;
+        
+        // Read the console output from the serial file
+        match std::fs::read_to_string(&serial_file_path) {
+            Ok(content) => Ok(content),
+            Err(_) => {
+                // If no file exists yet, try to get output via VM info
+                self.get_vm_console_info(instance).await
+            }
+        }
+    }
+
     fn name(&self) -> &'static str {
         "virtualbox"
+    }
+}
+
+impl VirtualBoxProvider {
+    async fn configure_console_output(&self, instance: &VmInstance, output_file: &str) -> Result<()> {
+        // Configure serial port 1 to output to file
+        let configs = [
+            ("--uart1", "0x3F8", "4"),
+            ("--uartmode1", "file", output_file),
+        ];
+        
+        for (key, value1, value2) in &configs {
+            let mut cmd = self.vboxmanage_cmd();
+            cmd.args(["modifyvm", &instance.name, key]);
+            
+            if key == &"--uart1" {
+                cmd.args([value1, value2]);
+            } else {
+                cmd.args([&format!("{} {}", value1, value2)]);
+            }
+            
+            let output = cmd.output()
+                .context("Failed to configure serial port")?;
+            
+            if !output.status.success() {
+                warn!("Failed to configure serial port: {}", 
+                      String::from_utf8_lossy(&output.stderr));
+            }
+        }
+        
+        Ok(())
+    }
+    
+    async fn get_vm_console_info(&self, instance: &VmInstance) -> Result<String> {
+        // Get VM runtime information
+        let output = self.vboxmanage_cmd()
+            .args(["showvminfo", &instance.name, "--machinereadable"])
+            .output()
+            .context("Failed to get VM info")?;
+        
+        if !output.status.success() {
+            return Err(anyhow!("Failed to get VM console info: {}", 
+                String::from_utf8_lossy(&output.stderr)));
+        }
+        
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        
+        // Extract relevant console/boot information
+        let mut console_lines = Vec::new();
+        
+        for line in output_str.lines() {
+            if line.contains("VMState") || 
+               line.contains("bootmenu") || 
+               line.contains("boot") ||
+               line.contains("uart") ||
+               line.contains("serial") {
+                console_lines.push(line);
+            }
+        }
+        
+        if console_lines.is_empty() {
+            return Ok("No console output available".to_string());
+        }
+        
+        Ok(console_lines.join("\n"))
     }
 }
 

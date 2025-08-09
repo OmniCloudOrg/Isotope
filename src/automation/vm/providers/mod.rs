@@ -6,6 +6,7 @@ pub mod hyperv;
 use anyhow::Result;
 use async_trait::async_trait;
 use std::path::Path;
+use image::DynamicImage;
 
 use crate::automation::vm::VmInstance;
 
@@ -22,6 +23,8 @@ pub trait VmProviderTrait: Send + Sync {
     async fn is_running(&self, instance: &VmInstance) -> Result<bool>;
     async fn wait_for_shutdown(&self, instance: &VmInstance) -> Result<()>;
     async fn send_keys(&self, instance: &VmInstance, keys: &[String]) -> Result<()>;
+    async fn capture_screen(&self, instance: &VmInstance) -> Result<DynamicImage>;
+    async fn get_console_output(&self, instance: &VmInstance) -> Result<String>;
     fn name(&self) -> &'static str;
 }
 

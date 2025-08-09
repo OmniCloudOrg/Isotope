@@ -314,7 +314,7 @@ LABEL live
     fn copy_isolinux_files(&self, iso_fs: &Path) -> Result<()> {
         let isolinux_dir = iso_fs.join("isolinux");
 
-        // In a real implementation, these files would be copied from syslinux package
+        // TODO: these files would be copied from syslinux package
         // For now, create placeholder files
         std::fs::write(isolinux_dir.join("isolinux.bin"), b"placeholder")?;
         std::fs::write(isolinux_dir.join("boot.cat"), b"placeholder")?;

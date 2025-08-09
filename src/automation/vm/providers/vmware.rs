@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use std::path::Path;
 use tracing::info;
+use image::DynamicImage;
 
 use crate::automation::vm::{VmInstance, VmState};
 use super::VmProviderTrait;
@@ -69,6 +70,14 @@ impl VmProviderTrait for VMwareProvider {
     async fn send_keys(&self, instance: &VmInstance, keys: &[String]) -> Result<()> {
         info!("Sending keys to VMware VM {}: {:?}", instance.name, keys);
         Err(anyhow!("VMware provider not yet implemented"))
+    }
+
+    async fn capture_screen(&self, _instance: &VmInstance) -> Result<DynamicImage> {
+        Err(anyhow!("VMware screen capture not yet implemented"))
+    }
+
+    async fn get_console_output(&self, _instance: &VmInstance) -> Result<String> {
+        Err(anyhow!("VMware console output not yet implemented"))
     }
 
     fn name(&self) -> &'static str {

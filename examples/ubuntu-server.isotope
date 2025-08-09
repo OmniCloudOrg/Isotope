@@ -46,6 +46,7 @@ WAIT 5s
 
 ## Network configuration - wait for network detection
 # Look for a more unique phrase or full prompt
+
 WAIT 15s FOR "Configure the network"  # Use full prompt if possible
 # Usually auto-configured, just continue
 PRESS enter
@@ -63,9 +64,9 @@ WAIT 10s FOR "Ubuntu archive mirror"  # Use full prompt if possible
 PRESS enter
 WAIT 15s
 
-## Storage configuration - wait for disk detection
+## Guided storage configuration - wait for disk detection
 # Look for a more unique phrase or full prompt
-WAIT 20s FOR "Storage configuration"  # Use full prompt if possible
+WAIT 20s FOR "Guided storage configuration"  # Use full prompt if possible
 # Use entire disk (usually default option)
 PRESS enter
 WAIT 5s
@@ -73,7 +74,12 @@ WAIT 5s
 PRESS enter
 WAIT 10s
 
-## Storage confirmation dialog
+## Storage configuration - continue with default
+WAIT 10s FOR "Storage configuration"  # Use full prompt if possible
+PRESS enter
+WAIT 5s
+
+## Confirm destructive action
 WAIT 10s FOR "Confirm destructive action"
 PRESS tab
 PRESS enter

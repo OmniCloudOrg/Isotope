@@ -218,7 +218,7 @@ impl VmManager {
 
     pub fn get_or_create_configured_vm(&mut self) -> Result<VmInstance> {
         // For now, just create a new VM instance
-        // In a real implementation, this would reuse the configured VM from os_install stage
+        // TODO: this should reuse the configured VM from os_install stage
         self.create_vm()
     }
 
@@ -250,6 +250,16 @@ impl VmManager {
     pub async fn send_keys_to_vm(&self, instance: &VmInstance, keys: &[String]) -> Result<()> {
         let provider = self.get_provider(&instance.provider)?;
         provider.send_keys(instance, keys).await
+    }
+
+    pub async fn capture_screen(&self, instance: &VmInstance) -> Result<image::DynamicImage> {
+        let provider = self.get_provider(&instance.provider)?;
+        provider.capture_screen(instance).await
+    }
+
+    pub async fn get_console_output(&self, instance: &VmInstance) -> Result<String> {
+        let provider = self.get_provider(&instance.provider)?;
+        provider.get_console_output(instance).await
     }
 
     fn get_provider(&self, provider_type: &VmProvider) -> Result<Box<dyn VmProviderTrait>> {

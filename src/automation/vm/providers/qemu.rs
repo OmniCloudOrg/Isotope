@@ -6,6 +6,7 @@ use std::time::Duration;
 use tokio::process::Command as TokioCommand;
 use tokio::time::{sleep, timeout};
 use tracing::{debug, info, warn};
+use image::{DynamicImage, ImageBuffer, Rgb};
 
 use crate::automation::vm::{VmInstance, VmState, NetworkAdapterType};
 use super::VmProviderTrait;
@@ -107,6 +108,7 @@ impl VmProviderTrait for QemuProvider {
             .ok_or_else(|| anyhow!("VM disk path not set"))?;
 
         let monitor_socket = self.get_monitor_socket(instance);
+        let console_log = self.get_console_log_path(instance);
         
         let mut cmd = TokioCommand::new("qemu-system-x86_64");
         cmd.args([
@@ -114,6 +116,7 @@ impl VmProviderTrait for QemuProvider {
             "-smp", &instance.config.cpus.to_string(),
             "-drive", &format!("file={},format=qcow2", disk_path.display()),
             "-monitor", &format!("unix:{},server,nowait", monitor_socket.display()),
+            "-serial", &format!("file:{}", console_log.display()),
             "-daemonize",
             "-display", "none", // Headless
         ]);
@@ -357,7 +360,103 @@ impl VmProviderTrait for QemuProvider {
         Ok(())
     }
 
+    async fn capture_screen(&self, instance: &VmInstance) -> Result<DynamicImage> {
+        debug!("Capturing screen from QEMU VM: {}", instance.name);
+
+        let screenshot_path = self.working_dir.join(format!("{}-screenshot.ppm", instance.name));
+        
+        // Use QEMU monitor to take screenshot
+        let command = format!("screendump {}", screenshot_path.display());
+        self.send_monitor_command(instance, &command).await
+            .context("Failed to capture screenshot via QEMU monitor")?;
+        
+        // Wait a moment for the file to be written
+        sleep(Duration::from_millis(500)).await;
+        
+        if !screenshot_path.exists() {
+            return Err(anyhow!("Screenshot file was not created"));
+        }
+        
+        // Load the PPM image
+        let image = image::open(&screenshot_path)
+            .context("Failed to load screenshot image")?;
+        
+        // Clean up the temporary file
+        let _ = std::fs::remove_file(&screenshot_path);
+        
+        Ok(image)
+    }
+
+    async fn get_console_output(&self, instance: &VmInstance) -> Result<String> {
+        debug!("Getting console output from QEMU VM: {}", instance.name);
+        
+        let console_file = self.get_console_log_path(instance);
+        
+        // Try to read from console log file
+        if console_file.exists() {
+            match std::fs::read_to_string(&console_file) {
+                Ok(content) => return Ok(content),
+                Err(e) => {
+                    debug!("Failed to read console file: {}", e);
+                }
+            }
+        }
+        
+        // Try to get output via monitor info command
+        match self.send_monitor_command(instance, "info registers").await {
+            Ok(output) => {
+                // Get additional system info
+                let mut info_lines = vec![output];
+                
+                if let Ok(status) = self.send_monitor_command(instance, "info status").await {
+                    info_lines.push(status);
+                }
+                
+                if let Ok(block_info) = self.send_monitor_command(instance, "info block").await {
+                    info_lines.push(block_info);
+                }
+                
+                Ok(info_lines.join("\n---\n"))
+            }
+            Err(_) => {
+                // Try reading from any existing log files in working directory
+                self.read_qemu_logs(instance).await
+            }
+        }
+    }
+
     fn name(&self) -> &'static str {
         "qemu"
+    }
+}
+
+impl QemuProvider {
+    fn get_console_log_path(&self, instance: &VmInstance) -> PathBuf {
+        self.working_dir.join(format!("{}-console.log", instance.name))
+    }
+    
+    async fn read_qemu_logs(&self, instance: &VmInstance) -> Result<String> {
+        let log_patterns = [
+            format!("{}.log", instance.name),
+            format!("{}-serial.log", instance.name),
+            format!("{}-console.log", instance.name),
+        ];
+        
+        let mut all_logs = Vec::new();
+        
+        for pattern in &log_patterns {
+            let log_path = self.working_dir.join(pattern);
+            if log_path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&log_path) {
+                    all_logs.push(format!("=== {} ===\n{}", pattern, content));
+                }
+            }
+        }
+        
+        if all_logs.is_empty() {
+            Ok("No console logs available".to_string())
+        } else {
+            Ok(all_logs.join("\n\n"))
+        }
     }
 }
