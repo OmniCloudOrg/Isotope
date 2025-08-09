@@ -30,9 +30,27 @@ impl PuppetManager {
     }
 
     pub async fn execute_stage_instructions(&mut self, vm: &VmInstance, stage: &Stage, vm_manager: &VmManager) -> Result<()> {
+        self.execute_stage_instructions_from_step(vm, stage, vm_manager, None).await
+    }
+
+    pub async fn execute_stage_instructions_from_step(&mut self, vm: &VmInstance, stage: &Stage, vm_manager: &VmManager, continue_from_step: Option<usize>) -> Result<()> {
         info!("Executing puppet instructions for stage: {:?}", stage.name);
 
-        for (i, instruction) in stage.instructions.iter().enumerate() {
+        let start_from = if let Some(step) = continue_from_step {
+            if step == 0 {
+                return Err(anyhow!("Step numbers are 1-based, cannot continue from step 0"));
+            }
+            let index = step - 1; // Convert to 0-based index
+            if index >= stage.instructions.len() {
+                return Err(anyhow!("Cannot continue from step {}, stage only has {} instructions", step, stage.instructions.len()));
+            }
+            info!("Continuing from step {}/{}", step, stage.instructions.len());
+            index
+        } else {
+            0
+        };
+
+        for (i, instruction) in stage.instructions.iter().enumerate().skip(start_from) {
             info!("Executing instruction {}/{}: {:?}", i + 1, stage.instructions.len(), instruction);
             
             match instruction {

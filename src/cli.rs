@@ -10,6 +10,9 @@ pub enum Commands {
         /// Output path for the generated ISO (overrides spec)
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Continue from a specific step number (1-based index)
+        #[arg(long)]
+        continue_from: Option<usize>,
     },
     /// Validate an Isotope specification
     Validate {

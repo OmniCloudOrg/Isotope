@@ -41,16 +41,25 @@ async fn main() -> Result<()> {
     info!("Isotope v{} starting", env!("CARGO_PKG_VERSION"));
 
     let result = match cli.command {
-        Commands::Build { spec_file, output } => {
+        Commands::Build { spec_file, output, continue_from } => {
             info!("Building ISO from specification: {}", spec_file.display());
+            
+            if let Some(step) = continue_from {
+                info!("Continuing from step {}", step);
+            }
             
             let spec = IsotopeSpec::from_file(&spec_file)
                 .with_context(|| format!("Failed to load spec file: {}", spec_file.display()))?;
             
             let mut builder = Builder::new(spec);
+            builder.set_spec_file_path(spec_file.clone());
             
             if let Some(output_path) = output {
                 builder.set_output_path(output_path);
+            }
+            
+            if let Some(step) = continue_from {
+                builder.set_continue_from_step(step);
             }
             
             builder.build().await

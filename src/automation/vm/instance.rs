@@ -1,3 +1,4 @@
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -19,6 +20,20 @@ pub enum VmProvider {
     VirtualBox,
     VMware,
     HyperV,
+}
+
+impl std::str::FromStr for VmProvider {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Qemu" => Ok(VmProvider::Qemu),
+            "VirtualBox" => Ok(VmProvider::VirtualBox),
+            "VMware" => Ok(VmProvider::VMware),
+            "HyperV" => Ok(VmProvider::HyperV),
+            _ => Err(anyhow::anyhow!("Unknown VM provider: {}", s)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

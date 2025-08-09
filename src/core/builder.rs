@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -7,12 +7,14 @@ use tracing::{error, info, warn, debug};
 use crate::automation::{puppet::PuppetManager, vm::{VmManager, VmInstance}};
 use crate::config::{IsotopeSpec, StageType};
 use crate::iso::{extractor::IsoExtractor, packager::IsoPackager};
-use crate::utils::{checksum::ChecksumVerifier, fs::FileSystemManager};
+use crate::utils::{checksum::ChecksumVerifier, fs::FileSystemManager, VmMetadata};
 
 pub struct Builder {
     spec: IsotopeSpec,
+    spec_file_path: Option<PathBuf>,
     working_dir: PathBuf,
     output_path: Option<PathBuf>,
+    continue_from_step: Option<usize>,
     vm_manager: Arc<Mutex<VmManager>>,
     puppet_manager: Arc<Mutex<PuppetManager>>,
     iso_extractor: IsoExtractor,
@@ -27,8 +29,10 @@ impl Builder {
         
         Self {
             spec,
+            spec_file_path: None,
             working_dir: working_dir.clone(),
             output_path: None,
+            continue_from_step: None,
             vm_manager: Arc::new(Mutex::new(VmManager::new())),
             puppet_manager: Arc::new(Mutex::new(PuppetManager::new())),
             iso_extractor: IsoExtractor::new(),
@@ -42,8 +46,123 @@ impl Builder {
         self.output_path = Some(path);
     }
 
+    pub fn set_continue_from_step(&mut self, step: usize) {
+        self.continue_from_step = Some(step);
+    }
+
+    pub fn set_spec_file_path(&mut self, path: PathBuf) {
+        self.spec_file_path = Some(path);
+    }
+
+    fn get_stage_step_mapping(&self, target_step: usize) -> Result<(StageType, usize)> {
+        let mut current_step = 1;
+        
+        // Check os_install stage
+        if let Some(os_install_stage) = self.spec.get_stage(&StageType::OsInstall) {
+            let stage_end = current_step + os_install_stage.instructions.len() - 1;
+            if target_step >= current_step && target_step <= stage_end {
+                let step_in_stage = target_step - current_step + 1;
+                return Ok((StageType::OsInstall, step_in_stage));
+            }
+            current_step += os_install_stage.instructions.len();
+        }
+        
+        // Check os_configure stage
+        if let Some(os_configure_stage) = self.spec.get_stage(&StageType::OsConfigure) {
+            let stage_end = current_step + os_configure_stage.instructions.len() - 1;
+            if target_step >= current_step && target_step <= stage_end {
+                let step_in_stage = target_step - current_step + 1;
+                return Ok((StageType::OsConfigure, step_in_stage));
+            }
+            current_step += os_configure_stage.instructions.len();
+        }
+        
+        Err(anyhow!("Step {} is out of range. Total steps available: {}", target_step, current_step - 1))
+    }
+
+    fn print_step_summary(&self) {
+        let mut current_step = 1;
+        
+        info!("Step summary:");
+        
+        if let Some(os_install_stage) = self.spec.get_stage(&StageType::OsInstall) {
+            info!("  Steps {}-{}: os_install stage ({} instructions)", 
+                  current_step, 
+                  current_step + os_install_stage.instructions.len() - 1,
+                  os_install_stage.instructions.len());
+            current_step += os_install_stage.instructions.len();
+        }
+        
+        if let Some(os_configure_stage) = self.spec.get_stage(&StageType::OsConfigure) {
+            info!("  Steps {}-{}: os_configure stage ({} instructions)", 
+                  current_step, 
+                  current_step + os_configure_stage.instructions.len() - 1,
+                  os_configure_stage.instructions.len());
+            current_step += os_configure_stage.instructions.len();
+        }
+        
+        info!("Total steps: {}", current_step - 1);
+    }
+
+    async fn get_existing_vm_instance(&self) -> Result<Option<VmInstance>> {
+        let Some(spec_file_path) = &self.spec_file_path else {
+            return Ok(None);
+        };
+
+        let metadata = VmMetadata::load_from_current_dir()?;
+        
+        if let Some(vm_entry) = metadata.get_vm_for_isotope_file(spec_file_path) {
+            info!("Found existing VM {} for this isotope file", vm_entry.vm_name);
+            
+            // Check if the VM still exists
+            let vm_manager = self.vm_manager.lock().await;
+            
+            // Create a VmInstance from the metadata to check if it's still valid
+            let vm_instance = VmInstance::new(
+                vm_entry.vm_id.clone(),
+                vm_entry.vm_name.clone(),
+                vm_entry.provider.parse().map_err(|_| anyhow!("Invalid provider: {}", vm_entry.provider))?,
+                // We'll use default config since we don't store it
+                crate::automation::vm::VmConfig::default(),
+            );
+            
+            // Check if VM is accessible
+            if vm_manager.get_provider(&vm_instance.provider)?.is_running(&vm_instance).await.unwrap_or(false) {
+                info!("Existing VM {} is running and accessible", vm_entry.vm_name);
+                return Ok(Some(vm_instance));
+            } else {
+                info!("Existing VM {} is not running, will create new one", vm_entry.vm_name);
+            }
+        }
+        
+        Ok(None)
+    }
+
+    fn save_vm_metadata(&self, vm_instance: &VmInstance) -> Result<()> {
+        let Some(spec_file_path) = &self.spec_file_path else {
+            return Ok(()); // No spec file path, can't save metadata
+        };
+
+        let mut metadata = VmMetadata::load_from_current_dir()
+            .unwrap_or_default();
+        
+        metadata.cleanup_stale_entries();
+        metadata.add_or_update_vm(spec_file_path, vm_instance)?;
+        metadata.save_to_current_dir()?;
+        
+        Ok(())
+    }
+
     pub async fn build(&self) -> Result<()> {
         info!("Starting ISO build process");
+        
+        // Show step summary for user reference
+        self.print_step_summary();
+        
+        if let Some(step) = self.continue_from_step {
+            let (stage, step_in_stage) = self.get_stage_step_mapping(step)?;
+            info!("Continuing from step {} (stage: {:?}, step {} within stage)", step, stage, step_in_stage);
+        }
         
         // Create working directory
         self.fs_manager.create_working_directory()
@@ -130,10 +249,23 @@ impl Builder {
         info!("Executing os_install stage");
         
         if let Some(os_install_stage) = self.spec.get_stage(&StageType::OsInstall) {
-            // Start VM with source ISO
             let mut vm_manager = self.vm_manager.lock().await;
-            let vm_instance = vm_manager.create_vm()
-                .context("Failed to create VM instance")?;
+            
+            // Check if we should reuse an existing VM when continuing
+            let vm_instance = if self.continue_from_step.is_some() {
+                if let Some(existing_vm) = self.get_existing_vm_instance().await? {
+                    info!("Reusing existing VM {} for --continue", existing_vm.name);
+                    existing_vm
+                } else {
+                    info!("No existing VM found for --continue, creating new VM");
+                    vm_manager.create_vm()
+                        .context("Failed to create VM instance")?
+                }
+            } else {
+                // Normal run, create new VM
+                vm_manager.create_vm()
+                    .context("Failed to create VM instance")?
+            };
 
             vm_manager.attach_iso(&vm_instance, source_iso_path).await
                 .context("Failed to attach source ISO to VM")?;
@@ -143,8 +275,28 @@ impl Builder {
 
             // Execute puppet automation
             let mut puppet_manager = self.puppet_manager.lock().await;
-            puppet_manager.execute_stage_instructions(&vm_instance, os_install_stage, &vm_manager).await
+            
+            // Check if we need to continue from a specific step in this stage
+            let continue_from = if let Some(target_step) = self.continue_from_step {
+                match self.get_stage_step_mapping(target_step)? {
+                    (StageType::OsInstall, step_in_stage) => {
+                        info!("Continuing os_install stage from step {}", step_in_stage);
+                        Some(step_in_stage)
+                    }
+                    (other_stage, _) => {
+                        info!("Target step {} is in {:?} stage, skipping os_install", target_step, other_stage);
+                        return Ok(Some(vm_instance)); // Skip this stage entirely
+                    }
+                }
+            } else {
+                None
+            };
+            
+            puppet_manager.execute_stage_instructions_from_step(&vm_instance, os_install_stage, &vm_manager, continue_from).await
                 .context("Failed to execute OS installation instructions")?;
+
+            // Save VM metadata for future --continue runs
+            self.save_vm_metadata(&vm_instance)?;
 
             Ok(Some(vm_instance))
         } else {
@@ -163,23 +315,80 @@ impl Builder {
                 info!("Reusing VM instance from os_install stage: {}", existing_instance.name);
                 existing_instance
             } else {
-                info!("No VM instance from os_install, creating new one");
-                let instance = vm_manager.get_or_create_configured_vm()
-                    .context("Failed to get configured VM")?;
-                
-                vm_manager.start_vm(&instance).await
-                    .context("Failed to start configured VM")?;
+                // Check if we can reuse an existing VM when continuing directly to os_configure
+                if let Some(target_step) = self.continue_from_step {
+                    if let Ok((StageType::OsConfigure, _)) = self.get_stage_step_mapping(target_step) {
+                        if let Some(existing_vm) = self.get_existing_vm_instance().await? {
+                            info!("Reusing existing VM {} for --continue in os_configure stage", existing_vm.name);
+                            existing_vm
+                        } else {
+                            info!("No existing VM found for --continue, creating new one");
+                            let instance = vm_manager.get_or_create_configured_vm()
+                                .context("Failed to get configured VM")?;
+                            
+                            vm_manager.start_vm(&instance).await
+                                .context("Failed to start configured VM")?;
 
-                // Wait for OS boot
-                vm_manager.wait_for_boot(&instance).await
-                    .context("Failed to wait for OS boot")?;
-                
-                instance
+                            // Wait for OS boot
+                            vm_manager.wait_for_boot(&instance).await
+                                .context("Failed to wait for OS boot")?;
+                            
+                            instance
+                        }
+                    } else {
+                        info!("No VM instance from os_install, creating new one");
+                        let instance = vm_manager.get_or_create_configured_vm()
+                            .context("Failed to get configured VM")?;
+                        
+                        vm_manager.start_vm(&instance).await
+                            .context("Failed to start configured VM")?;
+
+                        // Wait for OS boot
+                        vm_manager.wait_for_boot(&instance).await
+                            .context("Failed to wait for OS boot")?;
+                        
+                        instance
+                    }
+                } else {
+                    info!("No VM instance from os_install, creating new one");
+                    let instance = vm_manager.get_or_create_configured_vm()
+                        .context("Failed to get configured VM")?;
+                    
+                    vm_manager.start_vm(&instance).await
+                        .context("Failed to start configured VM")?;
+
+                    // Wait for OS boot
+                    vm_manager.wait_for_boot(&instance).await
+                        .context("Failed to wait for OS boot")?;
+                    
+                    instance
+                }
             };
 
             // Execute configuration instructions
             let mut puppet_manager = self.puppet_manager.lock().await;
-            puppet_manager.execute_stage_instructions(&vm_instance, os_configure_stage, &vm_manager).await
+            
+            // Check if we need to continue from a specific step in this stage
+            let continue_from = if let Some(target_step) = self.continue_from_step {
+                match self.get_stage_step_mapping(target_step)? {
+                    (StageType::OsConfigure, step_in_stage) => {
+                        info!("Continuing os_configure stage from step {}", step_in_stage);
+                        Some(step_in_stage)
+                    }
+                    (StageType::OsInstall, _) => {
+                        // If target step is in os_install, we should execute os_configure normally
+                        None
+                    }
+                    (other_stage, _) => {
+                        info!("Target step {} is in {:?} stage, skipping os_configure", target_step, other_stage);
+                        return Ok(()); // Skip this stage entirely
+                    }
+                }
+            } else {
+                None
+            };
+            
+            puppet_manager.execute_stage_instructions_from_step(&vm_instance, os_configure_stage, &vm_manager, continue_from).await
                 .context("Failed to execute OS configuration instructions")?;
 
             // Create live OS snapshot

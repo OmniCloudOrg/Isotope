@@ -272,7 +272,7 @@ impl VmManager {
         provider.get_console_output(instance).await
     }
 
-    fn get_provider(&self, provider_type: &VmProvider) -> Result<Box<dyn VmProviderTrait>> {
+    pub fn get_provider(&self, provider_type: &VmProvider) -> Result<Box<dyn VmProviderTrait>> {
         Ok(create_provider(provider_type))
     }
 
