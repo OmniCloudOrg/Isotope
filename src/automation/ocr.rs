@@ -131,41 +131,41 @@ impl OcrEngine {
             .context("Failed to prepare OCR input")?;
         
         // Step 1: Detect word rectangles - handle failures gracefully
-        info!("OCR Step 1: Detecting words...");
+        trace!("OCR Step 1: Detecting words...");
         let word_rects = match self.engine.detect_words(&ocr_input) {
             Ok(rects) => {
-                info!("OCR detected {} word regions", rects.len());
+                trace!("OCR detected {} word regions", rects.len());
                 if rects.is_empty() {
-                    warn!("Word detection succeeded but found no text regions. Image may be blank or text-free.");
+                    trace!("Word detection succeeded but found no text regions. Image may be blank or text-free.");
                 }
                 rects
             }
             Err(e) => {
-                warn!("OCR word detection failed: {}. This can happen with dark screens, BIOS, boot screens, or low-contrast images.", e);
-                info!("Continuing with fallback text recognition approaches");
+                trace!("OCR word detection failed: {}. This can happen with dark screens, BIOS, boot screens, or low-contrast images.", e);
+                trace!("Continuing with fallback text recognition approaches");
                 Vec::new()
             }
         };
-        
-        // Step 2: Find text lines from word rectangles  
-        info!("OCR Step 2: Finding text lines...");
+
+        // Step 2: Find text lines from word rectangles
+        trace!("OCR Step 2: Finding text lines...");
         let line_rects = if word_rects.is_empty() {
-            info!("No word regions available. Using basic image regions for text detection.");
+            trace!("No word regions available. Using basic image regions for text detection.");
             Vec::new()
         } else {
             self.engine.find_text_lines(&ocr_input, &word_rects)
         };
-        
-        info!("OCR found {} text lines", line_rects.len());
-        
+
+        trace!("OCR found {} text lines", line_rects.len());
+
         // Step 3: Recognize text
-        info!("OCR Step 3: Recognizing text...");
+        trace!("OCR Step 3: Recognizing text...");
         let line_texts = if !line_rects.is_empty() {
             // Normal case: recognize text in detected lines
             match self.engine.recognize_text(&ocr_input, &line_rects) {
                 Ok(texts) => {
                     let successful_recognitions = texts.iter().filter(|t| t.is_some()).count();
-                    info!("Successfully recognized text in {}/{} detected lines", 
+                    trace!("Successfully recognized text in {}/{} detected lines", 
                           successful_recognitions, texts.len());
                     texts
                 }
@@ -175,11 +175,11 @@ impl OcrEngine {
                 }
             }
         } else {
-            info!("No text lines detected. This is normal for screens with minimal text (BIOS, boot screens, etc.)");
+            trace!("No text lines detected. This is normal for screens with minimal text (BIOS, boot screens, etc.)");
             Vec::new()
         };
         
-        info!("OCR recognition returned {} results", line_texts.len());
+        trace!("OCR recognition returned {} results", line_texts.len());
         
         // Combine all recognized text with better filtering and formatting
         let extracted_text = line_texts
@@ -198,7 +198,7 @@ impl OcrEngine {
             .join(" ");
         
         if !extracted_text.is_empty() {
-            info!("OCR successfully extracted text: '{}'", extracted_text);
+            trace!("OCR successfully extracted text: '{}'", extracted_text);
         } else {
             debug!("OCR completed but no readable text was found");
         }
@@ -206,31 +206,31 @@ impl OcrEngine {
         // Provide detailed debugging information
         if extracted_text.is_empty() {
             if black_percentage > 90 {
-                info!("No text detected on predominantly black screen ({}% black). This is normal for:", black_percentage);
-                info!("  - Boot screens, BIOS menus, or splash screens");
-                info!("  - VM startup before OS loads");
-                info!("  - Blank or powered-off displays");
+                trace!("No text detected on predominantly black screen ({}% black). This is normal for:", black_percentage);
+                trace!("  - Boot screens, BIOS menus, or splash screens");
+                trace!("  - VM startup before OS loads");
+                trace!("  - Blank or powered-off displays");
             } else if white_percentage > 90 {
-                info!("No text detected on predominantly white screen ({}% white). Possible scenarios:", white_percentage);
-                info!("  - Blank document or empty desktop");
-                info!("  - Screen saver or locked screen");
-                info!("  - Application with minimal UI");
+                trace!("No text detected on predominantly white screen ({}% white). Possible scenarios:", white_percentage);
+                trace!("  - Blank document or empty desktop");
+                trace!("  - Screen saver or locked screen");
+                trace!("  - Application with minimal UI");
             } else {
-                warn!("No text detected despite screen content ({}% black, {}% white).", black_percentage, white_percentage);
-                info!("This could indicate:");
-                info!("  - Text in unsupported format/language");
-                info!("  - Very low contrast or stylized text");
-                info!("  - Graphics-heavy interface with minimal text");
-                info!("  - OCR model limitations with this content type");
+                trace!("No text detected despite screen content ({}% black, {}% white).", black_percentage, white_percentage);
+                trace!("This could indicate:");
+                trace!("  - Text in unsupported format/language");
+                trace!("  - Very low contrast or stylized text");
+                trace!("  - Graphics-heavy interface with minimal text");
+                trace!("  - OCR model limitations with this content type");
             }
         } else {
-            info!("=== OCR SUCCESS - TEXT DETECTED ===");
-            info!("Extracted text: '{}'", extracted_text);
-            info!("Statistics: {} chars, {} words", 
+            trace!("=== OCR SUCCESS - TEXT DETECTED ===");
+            trace!("Extracted text: '{}'", extracted_text);
+            trace!("Statistics: {} chars, {} words", 
                   extracted_text.len(), 
                   extracted_text.split_whitespace().count());
-            info!("Screen: {}% black, {}% white", black_percentage, white_percentage);
-            info!("===================================");
+            trace!("Screen: {}% black, {}% white", black_percentage, white_percentage);
+            trace!("===================================");
         }
         
         Ok(extracted_text)
