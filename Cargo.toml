@@ -75,6 +75,9 @@ rten-tensor = "0.21.0"
 ureq = "3.0.5"
 home = "0.5.11"
 url = "2.5.4"
+parking_lot = "0.12"
+ring = "0.17"
+futures = "0.3"
 
 # Platform-specific dependencies
 [target.'cfg(unix)'.dependencies]
