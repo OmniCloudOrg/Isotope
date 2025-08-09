@@ -111,7 +111,7 @@ PRESS enter
 WAIT 5s
 
 # Wait for installation to complete - this takes a long time
-WAIT 45m FOR "complete"
+WAIT 20m FOR "complete"
 PRESS enter
 WAIT 30s
 
