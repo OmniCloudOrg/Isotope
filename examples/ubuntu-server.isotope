@@ -127,6 +127,7 @@ WAIT 5s
 ## Wait for installation to complete - this takes a long time  
 # Ubuntu can show different completion messages, try common patterns
 WAIT 20m FOR "reboot now"  # More flexible pattern matching
+PRESS down
 PRESS enter
 WAIT 30s
 
