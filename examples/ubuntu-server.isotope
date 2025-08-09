@@ -142,7 +142,7 @@ STAGE os_configure
 ## Wait for system to reboot and show login prompt
 # After reboot, Ubuntu takes time to start all services
 # Look for a more unique phrase or full prompt
-WAIT 3m FOR "ubuntu login:"  # Use full prompt if possible
+WAIT 3m FOR "ubuntu-server login:"  # Use full prompt if possible
 
 # Login with the ubuntu user we created
 TYPE ubuntu
