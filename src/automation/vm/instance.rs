@@ -98,6 +98,16 @@ impl Default for NetworkConfig {
 }
 
 impl VmInstance {
+    /// Returns the SSH host for this VM (default 127.0.0.1 for NAT)
+    pub fn ssh_host(&self) -> Option<String> {
+        // For now, always return localhost; can be extended for bridged networking
+        Some("127.0.0.1".to_string())
+    }
+
+    /// Returns the SSH port for this VM (from config)
+    pub fn ssh_port(&self) -> Option<u16> {
+        Some(self.config.network_config.ssh_port)
+    }
     pub fn new(id: String, name: String, provider: VmProvider, config: VmConfig) -> Self {
         Self {
             id,

@@ -153,6 +153,9 @@ TYPE ubuntu
 PRESS enter
 WAIT 5s
 
+TYPE ls
+PRESS enter
+
 # Wait for shell prompt to be ready
 WAIT 10s
 

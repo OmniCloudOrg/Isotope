@@ -8,6 +8,7 @@ use tracing::{debug, info, trace, warn};
 use image::DynamicImage;
 
 use crate::automation::vm::{VmInstance, VmState};
+use crate::utils::net;
 use super::VmProviderTrait;
 
 pub struct VirtualBoxProvider;
@@ -115,6 +116,7 @@ impl VmProviderTrait for VirtualBoxProvider {
             }
         }
 
+
         // Configure network adapter (NAT with port forwarding for SSH)
         let output = self.vboxmanage_cmd()
             .args([
@@ -125,14 +127,18 @@ impl VmProviderTrait for VirtualBoxProvider {
             ])
             .output()
             .context("Failed to configure network adapter")?;
-
         if !output.status.success() {
             return Err(anyhow!("Failed to configure network adapter: {}",
                 String::from_utf8_lossy(&output.stderr)));
         }
 
+        // Find a random unoccupied port for SSH forwarding
+        let ssh_host_port = net::find_free_port()
+            .ok_or_else(|| anyhow!("No free port found for SSH forwarding"))?;
+        // Store the port in the VM config for later use
+        instance.config.network_config.ssh_port = ssh_host_port;
+
         // Set up port forwarding for SSH (host port to guest 22)
-        let ssh_host_port = instance.config.network_config.ssh_port;
         let output = self.vboxmanage_cmd()
             .args([
                 "modifyvm", &instance.name,
@@ -140,7 +146,6 @@ impl VmProviderTrait for VirtualBoxProvider {
             ])
             .output()
             .context("Failed to set up port forwarding for SSH")?;
-
         if !output.status.success() {
             return Err(anyhow!("Failed to set up port forwarding: {}",
                 String::from_utf8_lossy(&output.stderr)));

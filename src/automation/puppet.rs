@@ -174,8 +174,19 @@ impl PuppetManager {
         match self.execute_remote_command(vm, &processed_command).await {
             Ok(_) => Ok(()),
             Err(e) => {
-                error!("RUN: Command failed: {}\nError: {}", processed_command, e);
-                Err(anyhow!("RUN failed: '{}': {}", processed_command, e))
+                let ssh_info = if let Some(creds) = &self.ssh_credentials {
+                    format!(
+                        "user='{}' host='{}' port='{}'",
+                        creds.username,
+                        vm.ssh_host().unwrap_or_else(|| "<unknown>".to_string()),
+                        vm.ssh_port().unwrap_or(22)
+                    )
+                } else {
+                    "<no ssh credentials configured>".to_string()
+                };
+                error!("RUN: Command failed: {}\nError: {}\nSSH: {}", processed_command, e, ssh_info);
+                error!("RUN: Troubleshooting tips: Check if the VM is running, SSH is enabled, network is accessible, and credentials are correct.");
+                Err(anyhow!("RUN failed: '{}': {}\nSSH: {}", processed_command, e, ssh_info))
             }
         }
     }
