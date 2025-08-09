@@ -49,7 +49,7 @@ pub enum Instruction {
     Run { command: String },
     Copy { from: PathBuf, to: PathBuf },
     // SSH login configuration for remote operations  
-    Login { username: String, password: Option<String>, private_key: Option<PathBuf>, host: Option<String>, port: Option<u16> },
+    Login { username: String, password: Option<String>, private_key: Option<PathBuf> },
     
     // Packaging (pack stage)
     Export { path: PathBuf },

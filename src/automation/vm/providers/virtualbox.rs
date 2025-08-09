@@ -46,6 +46,25 @@ impl VirtualBoxProvider {
 
 #[async_trait]
 impl VmProviderTrait for VirtualBoxProvider {
+    fn get_ssh_endpoint(&self, instance: &VmInstance) -> (String, u16) {
+        // Try to get the VM's real IP using VBoxManage guestproperty
+        let output = self.vboxmanage_cmd()
+            .args(["guestproperty", "get", &instance.name, "/VirtualBox/GuestInfo/Net/0/V4/IP"])
+            .output();
+        if let Ok(output) = output {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if let Some(ip) = stdout.strip_prefix("Value: ") {
+                    let ip = ip.trim().to_string();
+                    if !ip.is_empty() && ip != "null" {
+                        return (ip, 22);
+                    }
+                }
+            }
+        }
+        // Fallback to 127.0.0.1 and forwarded port
+        ("127.0.0.1".to_string(), instance.config.network_config.ssh_port)
+    }
     async fn create_vm(&self, instance: &mut VmInstance) -> Result<()> {
         info!("Creating VirtualBox VM: {}", instance.name);
 
@@ -94,6 +113,37 @@ impl VmProviderTrait for VirtualBoxProvider {
                 return Err(anyhow!("Failed to configure VM setting {}: {}", 
                     key, String::from_utf8_lossy(&output.stderr)));
             }
+        }
+
+        // Configure network adapter (NAT with port forwarding for SSH)
+        let output = self.vboxmanage_cmd()
+            .args([
+                "modifyvm", &instance.name,
+                "--nic1", "nat",
+                "--nictype1", "82540EM",
+                "--cableconnected1", "on"
+            ])
+            .output()
+            .context("Failed to configure network adapter")?;
+
+        if !output.status.success() {
+            return Err(anyhow!("Failed to configure network adapter: {}",
+                String::from_utf8_lossy(&output.stderr)));
+        }
+
+        // Set up port forwarding for SSH (host port to guest 22)
+        let ssh_host_port = instance.config.network_config.ssh_port;
+        let output = self.vboxmanage_cmd()
+            .args([
+                "modifyvm", &instance.name,
+                "--natpf1", &format!("ssh,tcp,,{},,22", ssh_host_port)
+            ])
+            .output()
+            .context("Failed to set up port forwarding for SSH")?;
+
+        if !output.status.success() {
+            return Err(anyhow!("Failed to set up port forwarding: {}",
+                String::from_utf8_lossy(&output.stderr)));
         }
 
         // Create and attach disk

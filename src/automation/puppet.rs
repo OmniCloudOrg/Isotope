@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Context, Result};
-use clap::error;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -19,8 +18,6 @@ pub struct SshCredentials {
     pub username: String,
     pub password: Option<String>,
     pub private_key: Option<PathBuf>,
-    pub host: String,
-    pub port: u16,
 }
 
 pub struct PuppetManager {
@@ -85,21 +82,13 @@ impl PuppetManager {
                 Instruction::Copy { from, to } => {
                     self.execute_copy_instruction(vm, from, to).await?;
                 }
-                Instruction::Login { username, password, private_key, host, port } => {
-                    let ssh_host = host.clone().unwrap_or_else(|| "127.0.0.1".to_string());
-                    let ssh_port = port.unwrap_or(vm.config.network_config.ssh_port);
-                    
+                Instruction::Login { username, password, private_key, .. } => {
                     self.ssh_credentials = Some(SshCredentials {
                         username: username.clone(),
                         password: password.clone(),
                         private_key: private_key.clone(),
-                        host: ssh_host,
-                        port: ssh_port,
                     });
-                    
-                    info!("SSH credentials configured for {}@{}:{}", username, 
-                          self.ssh_credentials.as_ref().unwrap().host,
-                          self.ssh_credentials.as_ref().unwrap().port);
+                    info!("SSH credentials configured for {}", username);
                 }
                 
                 _ => {
@@ -180,28 +169,31 @@ impl PuppetManager {
     async fn execute_run_instruction(&mut self, vm: &VmInstance, command: &str) -> Result<()> {
         // Process template variables in command
         let processed_command = self.template_engine.render_string(command, &self.environment_vars)?;
-        
-        info!("Running command in live OS: {}", processed_command);
-        
+        info!("RUN: Executing command in live OS: {}", processed_command);
         // Execute command via SSH/remote connection
-        self.execute_remote_command(vm, &processed_command).await
-            .context("Failed to execute remote command")?;
-
-        Ok(())
+        match self.execute_remote_command(vm, &processed_command).await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                error!("RUN: Command failed: {}\nError: {}", processed_command, e);
+                Err(anyhow!("RUN failed: '{}': {}", processed_command, e))
+            }
+        }
     }
 
     async fn execute_copy_instruction(&mut self, vm: &VmInstance, from: &Path, to: &Path) -> Result<()> {
-        info!("Copying file {} to VM path {}", from.display(), to.display());
-
+        info!("COPY: Copying file {} to VM path {}", from.display(), to.display());
         if !from.exists() {
-            return Err(anyhow!("Source file does not exist: {}", from.display()));
+            error!("COPY: Source file does not exist: {}", from.display());
+            return Err(anyhow!("COPY failed: Source file does not exist: {}", from.display()));
         }
-
         // Copy file to VM via SCP/remote copy
-        self.copy_file_to_vm(vm, from, to).await
-            .context("Failed to copy file to VM")?;
-
-        Ok(())
+        match self.copy_file_to_vm(vm, from, to).await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                error!("COPY: Failed to copy {} to {}: {}", from.display(), to.display(), e);
+                Err(anyhow!("COPY failed: {} -> {}: {}", from.display(), to.display(), e))
+            }
+        }
     }
 
     async fn wait_for_condition(&self, vm: &VmInstance, condition: &str, vm_manager: &VmManager) -> Result<()> {
@@ -262,32 +254,27 @@ impl PuppetManager {
 
     async fn execute_remote_command(&self, vm: &VmInstance, command: &str) -> Result<()> {
         info!("Executing remote command on VM {}: {}", vm.name, command);
-        
         if self.ssh_credentials.is_none() {
             return Err(anyhow!("No SSH credentials configured. Use LOGIN instruction first."));
         }
-        
-        // Use tokio::task::spawn_blocking to run SSH in blocking context
+        // Get endpoint from provider
+        let provider = crate::automation::vm::providers::create_provider(&vm.provider);
+        let (host, port) = provider.get_ssh_endpoint(vm);
         let credentials = self.ssh_credentials.as_ref().unwrap().clone();
         let command_clone = command.to_string();
-        
         tokio::task::spawn_blocking(move || {
-            Self::ssh_execute_command_with_credentials(&credentials, &command_clone)
-        }).await
-        .context("Failed to spawn SSH command task")?
-        
+            Self::ssh_execute_command_with_endpoint(&credentials, &host, port, &command_clone)
+        }).await.context("Failed to spawn SSH command task")?
     }
-    
-    fn ssh_execute_command_with_credentials(credentials: &SshCredentials, command: &str) -> Result<()> {
-        let tcp = std::net::TcpStream::connect(format!("{}:{}", credentials.host, credentials.port))
+
+    fn ssh_execute_command_with_endpoint(credentials: &SshCredentials, host: &str, port: u16, command: &str) -> Result<()> {
+        let tcp = std::net::TcpStream::connect(format!("{}:{}", host, port))
             .context("Failed to connect to VM via SSH")?;
-        
         let mut sess = Session::new()
             .context("Failed to create SSH session")?;
         sess.set_tcp_stream(tcp);
         sess.handshake()
             .context("SSH handshake failed")?;
-        
         // Try authentication methods in order of preference
         if let Some(ref private_key_path) = credentials.private_key {
             if private_key_path.exists() {
@@ -302,29 +289,22 @@ impl PuppetManager {
         } else {
             return Err(anyhow!("No SSH credentials provided (need either private key or password)"));
         }
-        
         let mut channel = sess.channel_session()
             .context("Failed to create SSH channel")?;
-        
         channel.exec(command)
             .context("Failed to execute command via SSH")?;
-        
         let mut output = String::new();
         channel.read_to_string(&mut output)
             .context("Failed to read command output")?;
-        
         let exit_status = channel.exit_status()
             .context("Failed to get command exit status")?;
-        
         channel.wait_close()
             .context("Failed to close SSH channel")?;
-        
         if exit_status == 0 {
             info!("Command executed successfully. Output: {}", output.trim());
         } else {
             return Err(anyhow!("Command failed with exit status {}. Output: {}", exit_status, output.trim()));
         }
-        
         Ok(())
     }
 
@@ -343,23 +323,22 @@ impl PuppetManager {
         let credentials = self.ssh_credentials.as_ref().unwrap().clone();
         let from_path = from.to_path_buf();
         let to_path = to.to_path_buf();
-        
+        let provider = crate::automation::vm::providers::create_provider(&vm.provider);
+        let (host, port) = provider.get_ssh_endpoint(vm);
         tokio::task::spawn_blocking(move || {
-            Self::scp_copy_file_with_credentials(&credentials, &from_path, &to_path)
+            Self::scp_copy_file_with_endpoint(&credentials, &host, port, &from_path, &to_path)
         }).await
         .context("Failed to spawn SCP file transfer task")?
     }
     
-    fn scp_copy_file_with_credentials(credentials: &SshCredentials, from: &Path, to: &Path) -> Result<()> {
-        let tcp = std::net::TcpStream::connect(format!("{}:{}", credentials.host, credentials.port))
+    fn scp_copy_file_with_endpoint(credentials: &SshCredentials, host: &str, port: u16, from: &Path, to: &Path) -> Result<()> {
+        let tcp = std::net::TcpStream::connect(format!("{}:{}", host, port))
             .context("Failed to connect to VM via SSH for file transfer")?;
-        
         let mut sess = Session::new()
             .context("Failed to create SSH session for file transfer")?;
         sess.set_tcp_stream(tcp);
         sess.handshake()
             .context("SSH handshake failed for file transfer")?;
-        
         // Try authentication methods in order of preference
         if let Some(ref private_key_path) = credentials.private_key {
             if private_key_path.exists() {
@@ -374,14 +353,9 @@ impl PuppetManager {
         } else {
             return Err(anyhow!("No SSH credentials provided for file transfer (need either private key or password)"));
         }
-        
         // Read the source file
         let file_contents = std::fs::read(from)
             .context("Failed to read source file")?;
-        
-        // Get file metadata for permissions
-        let metadata = std::fs::metadata(from)
-            .context("Failed to get source file metadata")?;
         
         // Create the remote file using SCP
         let mut remote_file = sess.scp_send(to, 0o644, file_contents.len() as u64, None)

@@ -26,6 +26,8 @@ pub trait VmProviderTrait: Send + Sync {
     async fn capture_screen(&self, instance: &VmInstance) -> Result<DynamicImage>;
     async fn get_console_output(&self, instance: &VmInstance) -> Result<String>;
     fn name(&self) -> &'static str;
+    /// Returns (host, port) for SSH endpoint
+    fn get_ssh_endpoint(&self, instance: &VmInstance) -> (String, u16);
 }
 
 pub fn create_provider(provider_type: &crate::automation::vm::VmProvider) -> Box<dyn VmProviderTrait> {

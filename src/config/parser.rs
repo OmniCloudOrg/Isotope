@@ -172,12 +172,10 @@ fn parse_stage_instruction(instruction: &str, args: &str, line_num: usize) -> Re
         }
         // SSH Login
         "LOGIN" => {
-            // Example: LOGIN root password=mypassword host=127.0.0.1 port=22
+            // Example: LOGIN root password=mypassword
             let mut username = String::new();
             let mut password = None;
             let mut private_key = None;
-            let mut host = None;
-            let mut port = None;
             let mut parts = args.split_whitespace();
             if let Some(user) = parts.next() {
                 username = user.to_string();
@@ -187,8 +185,6 @@ fn parse_stage_instruction(instruction: &str, args: &str, line_num: usize) -> Re
                     match k {
                         "password" => password = Some(v.to_string()),
                         "private_key" => private_key = Some(PathBuf::from(v)),
-                        "host" => host = Some(v.to_string()),
-                        "port" => port = v.parse().ok(),
                         _ => {},
                     }
                 }
@@ -197,8 +193,6 @@ fn parse_stage_instruction(instruction: &str, args: &str, line_num: usize) -> Re
                 username,
                 password,
                 private_key,
-                host,
-                port,
             })
         }
         // Packaging

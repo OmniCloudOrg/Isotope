@@ -425,6 +425,10 @@ impl VmProviderTrait for QemuProvider {
         }
     }
 
+    fn get_ssh_endpoint(&self, _instance: &VmInstance) -> (String, u16) {
+        ("127.0.0.1".to_string(), 22)
+    }
+
     fn name(&self) -> &'static str {
         "qemu"
     }
