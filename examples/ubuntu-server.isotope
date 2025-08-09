@@ -18,49 +18,54 @@ VM timeout=30m
 # STAGE os_install - Automated OS installation keypresses
 STAGE os_install
 
-# Wait for Ubuntu Server to fully boot and show the installation menu
-# Ubuntu takes time to load kernel, initialize hardware, and start installer
-WAIT 2m FOR "Ubuntu Server"
+## Wait for Ubuntu Server to fully boot and show the installation menu
+# Use a more specific pattern to avoid matching boot log
+WAIT 2m FOR "\u001b\[?25h\u001b\[?25lUbuntu Server"  # Looks for cursor movement + title, adjust as needed
 
 # Try to access boot menu or wait for automatic boot
 # If GRUB menu appears, select "Try or Install Ubuntu Server"
 PRESS enter
 WAIT 10s
 
-# Wait for the installer to fully load and show language selection
-# This can take 30-60 seconds depending on hardware
-WAIT 90s FOR "language"
+## Wait for the installer to fully load and show language selection
+# Look for a more unique phrase or full prompt
+WAIT 90s FOR "Please select your language"  # Use full prompt if possible
 
 # Language selection screen - usually defaults to English
 PRESS enter
 WAIT 5s
 
-# Keyboard layout selection
-WAIT 10s FOR "keyboard"
+## Keyboard layout selection
+# Look for a more unique phrase or full prompt
+WAIT 10s FOR "Keyboard configuration"  # Use full prompt if possible
 PRESS enter
 WAIT 3s
 # Confirm keyboard layout
 PRESS enter
 WAIT 5s
 
-# Network configuration - wait for network detection
-WAIT 15s FOR "network"
+## Network configuration - wait for network detection
+# Look for a more unique phrase or full prompt
+WAIT 15s FOR "Configure the network"  # Use full prompt if possible
 # Usually auto-configured, just continue
 PRESS enter
 WAIT 10s
 
-# Proxy configuration - skip if no proxy
-WAIT 10s FOR "proxy"
+## Proxy configuration - skip if no proxy
+# Look for a more unique phrase or full prompt
+WAIT 10s FOR "Configure proxy"  # Use full prompt if possible
 PRESS enter
 WAIT 5s
 
-# Mirror configuration - use default Ubuntu mirrors
-WAIT 10s FOR "mirror"
+## Mirror configuration - use default Ubuntu mirrors
+# Look for a more unique phrase or full prompt
+WAIT 10s FOR "Ubuntu archive mirror"  # Use full prompt if possible
 PRESS enter
 WAIT 15s
 
-# Storage configuration - wait for disk detection
-WAIT 20s FOR "storage"
+## Storage configuration - wait for disk detection
+# Look for a more unique phrase or full prompt
+WAIT 20s FOR "Storage configuration"  # Use full prompt if possible
 # Use entire disk (usually default option)
 PRESS enter
 WAIT 5s
@@ -68,20 +73,20 @@ WAIT 5s
 PRESS enter
 WAIT 10s
 
-# Storage confirmation dialog
-WAIT 10s FOR "confirm"
+## Storage confirmation dialog
+WAIT 10s FOR "Confirm destructive action"
 PRESS tab
 PRESS enter
 WAIT 5s
 
-# Destructive action confirmation
-WAIT 5s FOR "destructive"
+## Destructive action confirmation
+WAIT 5s FOR "This will destroy all data on the selected disks"
 PRESS tab
 PRESS enter
 WAIT 10s
 
-# Profile setup - wait for user creation screen
-WAIT 15s FOR "profile"
+## Profile setup - wait for user creation screen
+WAIT 15s FOR "Profile setup"
 TYPE ubuntu
 PRESS tab
 TYPE ubuntu-server
@@ -95,8 +100,9 @@ PRESS tab
 PRESS enter
 WAIT 10s
 
-# SSH setup
-WAIT 10s FOR "SSH"
+## SSH setup
+# Look for a more unique phrase or full prompt
+WAIT 10s FOR "Install OpenSSH server"  # Use full prompt if possible
 # Enable SSH server installation
 PRESS space
 WAIT 2s
@@ -104,27 +110,31 @@ PRESS tab
 PRESS enter
 WAIT 10s
 
-# Server snaps - skip additional packages for now
-WAIT 10s FOR "snaps"
+## Server snaps - skip additional packages for now
+# Look for a more unique phrase or full prompt
+WAIT 10s FOR "Featured Server Snaps"  # Use full prompt if possible
 PRESS tab
 PRESS enter
 WAIT 5s
 
-# Wait for installation to complete - this takes a long time
-WAIT 20m FOR "complete"
+## Wait for installation to complete - this takes a long time
+# Look for a more unique phrase or full prompt
+WAIT 20m FOR "Installation complete"  # Use full prompt if possible
 PRESS enter
 WAIT 30s
 
-# Wait for reboot prompt
-WAIT 2m FOR "reboot"
+## Wait for reboot prompt
+# Look for a more unique phrase or full prompt
+WAIT 2m FOR "Please remove the installation medium, then press ENTER"  # Use full prompt if possible
 PRESS enter
 
 # STAGE os_configure - Live OS configuration
 STAGE os_configure
 
-# Wait for system to reboot and show login prompt
+## Wait for system to reboot and show login prompt
 # After reboot, Ubuntu takes time to start all services
-WAIT 3m FOR "login"
+# Look for a more unique phrase or full prompt
+WAIT 3m FOR "ubuntu login:"  # Use full prompt if possible
 
 # Login with the ubuntu user we created
 TYPE ubuntu
