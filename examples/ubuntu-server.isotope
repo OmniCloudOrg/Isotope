@@ -138,6 +138,7 @@ PRESS enter
 
 # STAGE os_configure - Live OS configuration
 STAGE os_configure
+LOGIN root password=mypassword host=127.0.0.1 port=22
 
 ## Wait for system to reboot and show login prompt
 # After reboot, Ubuntu takes time to start all services

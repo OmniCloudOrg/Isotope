@@ -45,9 +45,11 @@ pub enum Instruction {
     Press { key: String, repeat: Option<u32> },
     Type { text: String },
     
-    // OS Configuration (os_configure stage)
+    // OS Configuration (os_configure stage) 
     Run { command: String },
     Copy { from: PathBuf, to: PathBuf },
+    // SSH login configuration for remote operations  
+    Login { username: String, password: Option<String>, private_key: Option<PathBuf>, host: Option<String>, port: Option<u16> },
     
     // Packaging (pack stage)
     Export { path: PathBuf },

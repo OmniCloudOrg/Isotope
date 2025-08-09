@@ -1,10 +1,12 @@
 use anyhow::{anyhow, Context, Result};
 use clap::error;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
+use std::io::{Read, Write};
 use tokio::time::{sleep, timeout};
 use tracing::{debug, error, info, trace, warn};
+use ssh2::Session;
 
 use crate::automation::keypress::{KeypressExecutor, KeypressAction};
 use crate::automation::vm::{VmInstance, VmManager};
@@ -12,11 +14,21 @@ use crate::automation::ocr::OcrEngine;
 use crate::config::{Instruction, Stage};
 use crate::utils::template::TemplateEngine;
 
+#[derive(Debug, Clone)]
+pub struct SshCredentials {
+    pub username: String,
+    pub password: Option<String>,
+    pub private_key: Option<PathBuf>,
+    pub host: String,
+    pub port: u16,
+}
+
 pub struct PuppetManager {
     keypress_executor: KeypressExecutor,
     template_engine: TemplateEngine,
     environment_vars: HashMap<String, String>,
     ocr_engine: OcrEngine,
+    ssh_credentials: Option<SshCredentials>,
 }
 
 impl PuppetManager {
@@ -26,6 +38,7 @@ impl PuppetManager {
             template_engine: TemplateEngine::new(),
             environment_vars: std::env::vars().collect(),
             ocr_engine: OcrEngine::new(),
+            ssh_credentials: None,
         }
     }
 
@@ -71,6 +84,22 @@ impl PuppetManager {
                 }
                 Instruction::Copy { from, to } => {
                     self.execute_copy_instruction(vm, from, to).await?;
+                }
+                Instruction::Login { username, password, private_key, host, port } => {
+                    let ssh_host = host.clone().unwrap_or_else(|| "127.0.0.1".to_string());
+                    let ssh_port = port.unwrap_or(vm.config.network_config.ssh_port);
+                    
+                    self.ssh_credentials = Some(SshCredentials {
+                        username: username.clone(),
+                        password: password.clone(),
+                        private_key: private_key.clone(),
+                        host: ssh_host,
+                        port: ssh_port,
+                    });
+                    
+                    info!("SSH credentials configured for {}@{}:{}", username, 
+                          self.ssh_credentials.as_ref().unwrap().host,
+                          self.ssh_credentials.as_ref().unwrap().port);
                 }
                 
                 _ => {
@@ -234,12 +263,67 @@ impl PuppetManager {
     async fn execute_remote_command(&self, vm: &VmInstance, command: &str) -> Result<()> {
         info!("Executing remote command on VM {}: {}", vm.name, command);
         
-        // Implementation would use SSH or other remote execution method
-        // This is a simplified placeholder
-        debug!("Would execute: {}", command);
+        if self.ssh_credentials.is_none() {
+            return Err(anyhow!("No SSH credentials configured. Use LOGIN instruction first."));
+        }
         
-        // Simulate command execution time
-        sleep(Duration::from_millis(500)).await;
+        // Use tokio::task::spawn_blocking to run SSH in blocking context
+        let credentials = self.ssh_credentials.as_ref().unwrap().clone();
+        let command_clone = command.to_string();
+        
+        tokio::task::spawn_blocking(move || {
+            Self::ssh_execute_command_with_credentials(&credentials, &command_clone)
+        }).await
+        .context("Failed to spawn SSH command task")?
+        
+    }
+    
+    fn ssh_execute_command_with_credentials(credentials: &SshCredentials, command: &str) -> Result<()> {
+        let tcp = std::net::TcpStream::connect(format!("{}:{}", credentials.host, credentials.port))
+            .context("Failed to connect to VM via SSH")?;
+        
+        let mut sess = Session::new()
+            .context("Failed to create SSH session")?;
+        sess.set_tcp_stream(tcp);
+        sess.handshake()
+            .context("SSH handshake failed")?;
+        
+        // Try authentication methods in order of preference
+        if let Some(ref private_key_path) = credentials.private_key {
+            if private_key_path.exists() {
+                sess.userauth_pubkey_file(&credentials.username, None, private_key_path, None)
+                    .context("SSH private key authentication failed")?;
+            } else {
+                return Err(anyhow!("SSH private key file not found: {}", private_key_path.display()));
+            }
+        } else if let Some(ref password) = credentials.password {
+            sess.userauth_password(&credentials.username, password)
+                .context("SSH password authentication failed")?;
+        } else {
+            return Err(anyhow!("No SSH credentials provided (need either private key or password)"));
+        }
+        
+        let mut channel = sess.channel_session()
+            .context("Failed to create SSH channel")?;
+        
+        channel.exec(command)
+            .context("Failed to execute command via SSH")?;
+        
+        let mut output = String::new();
+        channel.read_to_string(&mut output)
+            .context("Failed to read command output")?;
+        
+        let exit_status = channel.exit_status()
+            .context("Failed to get command exit status")?;
+        
+        channel.wait_close()
+            .context("Failed to close SSH channel")?;
+        
+        if exit_status == 0 {
+            info!("Command executed successfully. Output: {}", output.trim());
+        } else {
+            return Err(anyhow!("Command failed with exit status {}. Output: {}", exit_status, output.trim()));
+        }
         
         Ok(())
     }
@@ -247,10 +331,76 @@ impl PuppetManager {
     async fn copy_file_to_vm(&self, vm: &VmInstance, from: &Path, to: &Path) -> Result<()> {
         info!("Copying {} to VM {} at {}", from.display(), vm.name, to.display());
         
-        // Implementation would use SCP or shared folders
-        // This is a simplified placeholder
-        debug!("Would copy file from {} to {}", from.display(), to.display());
+        if !from.exists() {
+            return Err(anyhow!("Source file does not exist: {}", from.display()));
+        }
         
+        if self.ssh_credentials.is_none() {
+            return Err(anyhow!("No SSH credentials configured. Use LOGIN instruction first."));
+        }
+        
+        // Use tokio::task::spawn_blocking to run SSH/SCP in blocking context
+        let credentials = self.ssh_credentials.as_ref().unwrap().clone();
+        let from_path = from.to_path_buf();
+        let to_path = to.to_path_buf();
+        
+        tokio::task::spawn_blocking(move || {
+            Self::scp_copy_file_with_credentials(&credentials, &from_path, &to_path)
+        }).await
+        .context("Failed to spawn SCP file transfer task")?
+    }
+    
+    fn scp_copy_file_with_credentials(credentials: &SshCredentials, from: &Path, to: &Path) -> Result<()> {
+        let tcp = std::net::TcpStream::connect(format!("{}:{}", credentials.host, credentials.port))
+            .context("Failed to connect to VM via SSH for file transfer")?;
+        
+        let mut sess = Session::new()
+            .context("Failed to create SSH session for file transfer")?;
+        sess.set_tcp_stream(tcp);
+        sess.handshake()
+            .context("SSH handshake failed for file transfer")?;
+        
+        // Try authentication methods in order of preference
+        if let Some(ref private_key_path) = credentials.private_key {
+            if private_key_path.exists() {
+                sess.userauth_pubkey_file(&credentials.username, None, private_key_path, None)
+                    .context("SSH private key authentication failed for file transfer")?;
+            } else {
+                return Err(anyhow!("SSH private key file not found: {}", private_key_path.display()));
+            }
+        } else if let Some(ref password) = credentials.password {
+            sess.userauth_password(&credentials.username, password)
+                .context("SSH password authentication failed for file transfer")?;
+        } else {
+            return Err(anyhow!("No SSH credentials provided for file transfer (need either private key or password)"));
+        }
+        
+        // Read the source file
+        let file_contents = std::fs::read(from)
+            .context("Failed to read source file")?;
+        
+        // Get file metadata for permissions
+        let metadata = std::fs::metadata(from)
+            .context("Failed to get source file metadata")?;
+        
+        // Create the remote file using SCP
+        let mut remote_file = sess.scp_send(to, 0o644, file_contents.len() as u64, None)
+            .context("Failed to create remote file via SCP")?;
+        
+        remote_file.write_all(&file_contents)
+            .context("Failed to write file contents via SCP")?;
+        
+        // Close the file and wait for completion
+        remote_file.send_eof()
+            .context("Failed to send EOF via SCP")?;
+        remote_file.wait_eof()
+            .context("Failed to wait for EOF via SCP")?;
+        remote_file.close()
+            .context("Failed to close SCP channel")?;
+        remote_file.wait_close()
+            .context("Failed to wait for SCP channel close")?;
+        
+        info!("File copied successfully to VM: {} -> {}", from.display(), to.display());
         Ok(())
     }
 

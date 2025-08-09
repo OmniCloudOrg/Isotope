@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -170,7 +170,37 @@ fn parse_stage_instruction(instruction: &str, args: &str, line_num: usize) -> Re
                 to: PathBuf::from(copy_parts[1]),
             })
         }
-        
+        // SSH Login
+        "LOGIN" => {
+            // Example: LOGIN root password=mypassword host=127.0.0.1 port=22
+            let mut username = String::new();
+            let mut password = None;
+            let mut private_key = None;
+            let mut host = None;
+            let mut port = None;
+            let mut parts = args.split_whitespace();
+            if let Some(user) = parts.next() {
+                username = user.to_string();
+            }
+            for part in parts {
+                if let Some((k, v)) = part.split_once('=') {
+                    match k {
+                        "password" => password = Some(v.to_string()),
+                        "private_key" => private_key = Some(PathBuf::from(v)),
+                        "host" => host = Some(v.to_string()),
+                        "port" => port = v.parse().ok(),
+                        _ => {},
+                    }
+                }
+            }
+            Ok(Instruction::Login {
+                username,
+                password,
+                private_key,
+                host,
+                port,
+            })
+        }
         // Packaging
         "EXPORT" => {
             Ok(Instruction::Export {
@@ -195,7 +225,6 @@ fn parse_stage_instruction(instruction: &str, args: &str, line_num: usize) -> Re
                 label: args.trim_matches('"').to_string(),
             })
         }
-        
         _ => Err(anyhow!("Line {}: Unknown instruction '{}'", line_num, instruction)),
     }
 }
