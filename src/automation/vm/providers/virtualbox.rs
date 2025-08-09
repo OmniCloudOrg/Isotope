@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 use image::DynamicImage;
 
 use crate::automation::vm::{VmInstance, VmState};
@@ -418,11 +418,11 @@ impl VmProviderTrait for VirtualBoxProvider {
     }
 
     async fn capture_screen(&self, instance: &VmInstance) -> Result<DynamicImage> {
-        info!("=== VBOX SCREEN CAPTURE START ===");
-        info!("Capturing screen from VirtualBox VM: {}", instance.name);
+        trace!("=== VBOX SCREEN CAPTURE START ===");
+        trace!("Capturing screen from VirtualBox VM: {}", instance.name);
 
         let screenshot_path = format!("{}-screenshot.png", instance.name);
-        info!("Screenshot will be saved to: {}", screenshot_path);
+        trace!("Screenshot will be saved to: {}", screenshot_path);
         
         let output = self.vboxmanage_cmd()
             .args([
@@ -432,12 +432,12 @@ impl VmProviderTrait for VirtualBoxProvider {
             .output()
             .context("Failed to capture screenshot")?;
         
-        info!("VBoxManage screenshotpng exit code: {}", output.status);
+        trace!("VBoxManage screenshotpng exit code: {}", output.status);
         if !output.stdout.is_empty() {
-            info!("VBoxManage stdout: {}", String::from_utf8_lossy(&output.stdout));
+            trace!("VBoxManage stdout: {}", String::from_utf8_lossy(&output.stdout));
         }
         if !output.stderr.is_empty() {
-            info!("VBoxManage stderr: {}", String::from_utf8_lossy(&output.stderr));
+            trace!("VBoxManage stderr: {}", String::from_utf8_lossy(&output.stderr));
         }
         
         if !output.status.success() {
@@ -450,7 +450,7 @@ impl VmProviderTrait for VirtualBoxProvider {
         
         // Check if file exists and get its size
         if let Ok(metadata) = std::fs::metadata(&screenshot_path) {
-            info!("Screenshot file created successfully. Size: {} bytes", metadata.len());
+            trace!("Screenshot file created successfully. Size: {} bytes", metadata.len());
             if metadata.len() == 0 {
                 warn!("Screenshot file is empty (0 bytes)");
             }
@@ -458,22 +458,22 @@ impl VmProviderTrait for VirtualBoxProvider {
             warn!("Screenshot file was not created: {}", screenshot_path);
         }
         
-        info!("Loading screenshot image...");
+        trace!("Loading screenshot image...");
         let image = image::open(&screenshot_path)
             .context("Failed to load screenshot image")?;
         
-        info!("Screenshot loaded: {}x{} pixels, format: {:?}", 
+        trace!("Screenshot loaded: {}x{} pixels, format: {:?}", 
               image.width(), image.height(), image.color());
         
         // Clean up the temporary file
         let _ = std::fs::remove_file(&screenshot_path);
-        info!("=== VBOX SCREEN CAPTURE END ===");
+        trace!("=== VBOX SCREEN CAPTURE END ===");
         
         Ok(image)
     }
 
     async fn get_console_output(&self, instance: &VmInstance) -> Result<String> {
-        debug!("Getting console output from VirtualBox VM: {}", instance.name);
+        trace!("Getting console output from VirtualBox VM: {}", instance.name);
         
         // Check if VM has serial port configured for console output
         let serial_file_path = format!("{}-console.log", instance.name);

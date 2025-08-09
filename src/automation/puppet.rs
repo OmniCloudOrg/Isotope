@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::automation::keypress::{KeypressExecutor, KeypressAction};
 use crate::automation::vm::{VmInstance, VmManager};
@@ -288,15 +288,15 @@ impl PuppetManager {
                     match self.ocr_engine.extract_text(&image).await {
                         Ok(extracted_text) => {
                             if attempts <= 3 || attempts % 10 == 0 {
-                                info!("OCR extracted text (attempt {}): '{}'", attempts, extracted_text);
+                                trace!("OCR extracted text (attempt {}): '{}'", attempts, extracted_text);
                             }
                             
                             // Check if pattern is found in the extracted text (case-insensitive)
                             if extracted_text.to_lowercase().contains(&pattern.to_lowercase()) {
-                                info!("Found screen text '{}' on VM {} (attempt {})", pattern, vm.name, attempts);
+                                trace!("Found screen text '{}' on VM {} (attempt {})", pattern, vm.name, attempts);
                                 return Ok(());
                             } else {
-                                debug!("Pattern '{}' not found in extracted text (attempt {})", pattern, attempts);
+                                trace!("Pattern '{}' not found in extracted text (attempt {})", pattern, attempts);
                             }
                         }
                         Err(e) => {
