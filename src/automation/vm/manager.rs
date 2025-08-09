@@ -217,8 +217,18 @@ impl VmManager {
     }
 
     pub fn get_or_create_configured_vm(&mut self) -> Result<VmInstance> {
-        // For now, just create a new VM instance
-        // TODO: this should reuse the configured VM from os_install stage
+        // Try to find an existing VM instance with the same configuration
+        for instance in self.instances.values() {
+            if instance.provider == self.configured_provider 
+                && instance.config.memory_mb == self.default_config.memory_mb
+                && instance.config.cpus == self.default_config.cpus {
+                info!("Reusing existing VM instance: {}", instance.name);
+                return Ok(instance.clone());
+            }
+        }
+        
+        // If no existing VM found, create a new one
+        info!("No compatible existing VM found, creating new instance");
         self.create_vm()
     }
 
