@@ -103,12 +103,16 @@ PRESS tab
 PRESS enter
 WAIT 10s
 
+## Ubuntu pro
+PRESS enter
+
 ## SSH setup
 # Look for a more unique phrase or full prompt
-WAIT 10s FOR "Install OpenSSH server"  # Use full prompt if possible
+WAIT 10s FOR "SSH configuration"  # Use full prompt if possible
 # Enable SSH server installation
 PRESS space
 WAIT 2s
+PRESS tab
 PRESS tab
 PRESS enter
 WAIT 10s
@@ -120,9 +124,9 @@ PRESS tab
 PRESS enter
 WAIT 5s
 
-## Wait for installation to complete - this takes a long time
-# Look for a more unique phrase or full prompt
-WAIT 20m FOR "Installation complete"  # Use full prompt if possible
+## Wait for installation to complete - this takes a long time  
+# Ubuntu can show different completion messages, try common patterns
+WAIT 20m FOR "reboot now"  # More flexible pattern matching
 PRESS enter
 WAIT 30s
 

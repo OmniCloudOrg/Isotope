@@ -627,6 +627,67 @@ impl VirtualBoxProvider {
             "7" => vec!["08", "88"],
             "8" => vec!["09", "89"],
             "9" => vec!["0a", "8a"],
+            // Special characters
+            "-" => vec!["0c", "8c"],    // Hyphen/minus
+            "=" => vec!["0d", "8d"],    // Equals
+            "[" => vec!["1a", "9a"],    // Left bracket
+            "]" => vec!["1b", "9b"],    // Right bracket
+            "\\" => vec!["2b", "ab"],   // Backslash
+            ";" => vec!["27", "a7"],    // Semicolon
+            "'" => vec!["28", "a8"],    // Apostrophe/single quote
+            "`" => vec!["29", "a9"],    // Grave accent/backtick
+            "," => vec!["33", "b3"],    // Comma
+            "." => vec!["34", "b4"],    // Period/dot
+            "/" => vec!["35", "b5"],    // Forward slash
+            // Shifted characters (using shift scancode 2a for press, aa for release)
+            "!" => vec!["2a", "02", "82", "aa"],    // Shift+1
+            "@" => vec!["2a", "03", "83", "aa"],    // Shift+2
+            "#" => vec!["2a", "04", "84", "aa"],    // Shift+3
+            "$" => vec!["2a", "05", "85", "aa"],    // Shift+4
+            "%" => vec!["2a", "06", "86", "aa"],    // Shift+5
+            "^" => vec!["2a", "07", "87", "aa"],    // Shift+6
+            "&" => vec!["2a", "08", "88", "aa"],    // Shift+7
+            "*" => vec!["2a", "09", "89", "aa"],    // Shift+8
+            "(" => vec!["2a", "0a", "8a", "aa"],    // Shift+9
+            ")" => vec!["2a", "0b", "8b", "aa"],    // Shift+0
+            "_" => vec!["2a", "0c", "8c", "aa"],    // Shift+-
+            "+" => vec!["2a", "0d", "8d", "aa"],    // Shift+=
+            "{" => vec!["2a", "1a", "9a", "aa"],    // Shift+[
+            "}" => vec!["2a", "1b", "9b", "aa"],    // Shift+]
+            "|" => vec!["2a", "2b", "ab", "aa"],    // Shift+\
+            ":" => vec!["2a", "27", "a7", "aa"],    // Shift+;
+            "\"" => vec!["2a", "28", "a8", "aa"],   // Shift+'
+            "~" => vec!["2a", "29", "a9", "aa"],    // Shift+`
+            "<" => vec!["2a", "33", "b3", "aa"],    // Shift+,
+            ">" => vec!["2a", "34", "b4", "aa"],    // Shift+.
+            "?" => vec!["2a", "35", "b5", "aa"],    // Shift+/
+            // Uppercase letters (using shift)
+            "A" => vec!["2a", "1e", "9e", "aa"],
+            "B" => vec!["2a", "30", "b0", "aa"],
+            "C" => vec!["2a", "2e", "ae", "aa"],
+            "D" => vec!["2a", "20", "a0", "aa"],
+            "E" => vec!["2a", "12", "92", "aa"],
+            "F" => vec!["2a", "21", "a1", "aa"],
+            "G" => vec!["2a", "22", "a2", "aa"],
+            "H" => vec!["2a", "23", "a3", "aa"],
+            "I" => vec!["2a", "17", "97", "aa"],
+            "J" => vec!["2a", "24", "a4", "aa"],
+            "K" => vec!["2a", "25", "a5", "aa"],
+            "L" => vec!["2a", "26", "a6", "aa"],
+            "M" => vec!["2a", "32", "b2", "aa"],
+            "N" => vec!["2a", "31", "b1", "aa"],
+            "O" => vec!["2a", "18", "98", "aa"],
+            "P" => vec!["2a", "19", "99", "aa"],
+            "Q" => vec!["2a", "10", "90", "aa"],
+            "R" => vec!["2a", "13", "93", "aa"],
+            "S" => vec!["2a", "1f", "9f", "aa"],
+            "T" => vec!["2a", "14", "94", "aa"],
+            "U" => vec!["2a", "16", "96", "aa"],
+            "V" => vec!["2a", "2f", "af", "aa"],
+            "W" => vec!["2a", "11", "91", "aa"],
+            "X" => vec!["2a", "2d", "ad", "aa"],
+            "Y" => vec!["2a", "15", "95", "aa"],
+            "Z" => vec!["2a", "2c", "ac", "aa"],
             _ => return Err(anyhow!("Unknown key for VirtualBox: {}", key)),
         };
 

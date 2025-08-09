@@ -274,12 +274,12 @@ impl PuppetManager {
     async fn wait_for_screen_text(&self, vm: &VmInstance, pattern: &str, vm_manager: &VmManager) -> Result<()> {
         info!("Waiting for screen text '{}' on VM {}", pattern, vm.name);
         
-        let max_attempts = 60; // Try for up to 60 attempts (about 2 minutes with delays)
+        // No max attempts limit - let the outer timeout handle the duration
         let mut attempts = 0;
         
-        while attempts < max_attempts {
+        loop {
             attempts += 1;
-            debug!("Screen text detection attempt {}/{}", attempts, max_attempts);
+            debug!("Screen text detection attempt {}", attempts);
             
             // Capture the VM screen
             match vm_manager.capture_screen(vm).await {
@@ -319,8 +319,6 @@ impl PuppetManager {
             // Wait before next attempt
             sleep(Duration::from_secs(2)).await;
         }
-        
-        Err(anyhow!("Timeout waiting for screen text '{}' on VM {}", pattern, vm.name))
     }
 
     async fn execute_remote_command(&self, vm: &VmInstance, command: &str) -> Result<()> {
