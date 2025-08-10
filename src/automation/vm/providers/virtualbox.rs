@@ -405,6 +405,15 @@ impl VmProviderTrait for VirtualBoxProvider {
         // Ensure VM is created first
         if !self.vm_exists(&instance.name).await? {
             self.create_vm(instance).await?;
+        } else {
+            // VM exists, but we need to ensure the instance has the correct SSH port
+            if let Some(actual_port) = self.get_ssh_port_from_vbox(&instance.name).await? {
+                if instance.config.network_config.ssh_port != actual_port {
+                    info!("Updating instance SSH port from {} to {} to match VirtualBox configuration", 
+                        instance.config.network_config.ssh_port, actual_port);
+                    instance.config.network_config.ssh_port = actual_port;
+                }
+            }
         }
 
         // Create IDE controller if it doesn't exist

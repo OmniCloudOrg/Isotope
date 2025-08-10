@@ -10,7 +10,15 @@
       "Bash(rm:*)",
       "Bash(VBoxManage showvminfo:*)",
       "Bash(VBoxManage list:*)",
-      "Bash(cargo test:*)"
+      "Bash(cargo test:*)",
+      "Bash(cargo build:*)",
+      "Bash(VBoxManage.exe list:*)",
+      "Bash(VBoxManage.exe unregistervm:*)",
+      "Bash(timeout:*)",
+      "Bash(taskkill:*)",
+      "Bash(powershell:*)",
+      "Bash(VBoxManage.exe showvminfo:*)",
+      "Bash(VBoxManage.exe controlvm:*)"
     ],
     "deny": []
   }
