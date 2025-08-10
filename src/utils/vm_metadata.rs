@@ -15,7 +15,6 @@ pub struct VmMetadataEntry {
     pub created_at: String, // ISO 8601 timestamp
     pub last_used: String,  // ISO 8601 timestamp
     pub provider: String,
-    pub ssh_port: Option<u16>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
