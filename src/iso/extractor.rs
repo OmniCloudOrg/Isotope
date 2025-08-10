@@ -15,20 +15,23 @@ impl IsoExtractor {
     }
 
     pub fn extract_iso(&self, iso_path: &Path, extract_path: &Path) -> Result<()> {
-        info!("Extracting ISO: {} to {}", iso_path.display(), extract_path.display());
+        info!(
+            "Extracting ISO: {} to {}",
+            iso_path.display(),
+            extract_path.display()
+        );
 
         if !iso_path.exists() {
             return Err(anyhow!("ISO file does not exist: {}", iso_path.display()));
         }
 
-        std::fs::create_dir_all(extract_path)
-            .context("Failed to create extraction directory")?;
+        std::fs::create_dir_all(extract_path).context("Failed to create extraction directory")?;
 
         #[cfg(unix)]
         {
             self.extract_iso_unix(iso_path, extract_path)
         }
-        
+
         #[cfg(windows)]
         {
             self.extract_iso_windows(iso_path, extract_path)
@@ -39,22 +42,24 @@ impl IsoExtractor {
     fn extract_iso_unix(&self, iso_path: &Path, extract_path: &Path) -> Result<()> {
         // Create a temporary mount point
         let mount_point = self.temp_dir.join("iso_mount");
-        std::fs::create_dir_all(&mount_point)
-            .context("Failed to create mount point")?;
+        std::fs::create_dir_all(&mount_point).context("Failed to create mount point")?;
 
         // Mount the ISO
         let mount_output = Command::new("mount")
             .args([
-                "-o", "loop,ro", // Loop device, read-only
+                "-o",
+                "loop,ro", // Loop device, read-only
                 iso_path.to_str().unwrap(),
-                mount_point.to_str().unwrap()
+                mount_point.to_str().unwrap(),
             ])
             .output()
             .context("Failed to mount ISO")?;
 
         if !mount_output.status.success() {
-            return Err(anyhow!("Failed to mount ISO: {}", 
-                String::from_utf8_lossy(&mount_output.stderr)));
+            return Err(anyhow!(
+                "Failed to mount ISO: {}",
+                String::from_utf8_lossy(&mount_output.stderr)
+            ));
         }
 
         // Copy all files from mounted ISO to extraction directory
@@ -62,7 +67,7 @@ impl IsoExtractor {
             .args([
                 "-r", // Recursive
                 &format!("{}/*", mount_point.display()),
-                extract_path.to_str().unwrap()
+                extract_path.to_str().unwrap(),
             ])
             .output();
 
@@ -77,8 +82,10 @@ impl IsoExtractor {
 
         let cp_result = cp_output.unwrap();
         if !cp_result.status.success() {
-            return Err(anyhow!("Failed to copy ISO contents: {}", 
-                String::from_utf8_lossy(&cp_result.stderr)));
+            return Err(anyhow!(
+                "Failed to copy ISO contents: {}",
+                String::from_utf8_lossy(&cp_result.stderr)
+            ));
         }
 
         if let Err(e) = unmount_output {
@@ -92,14 +99,14 @@ impl IsoExtractor {
     #[cfg(windows)]
     fn extract_iso_windows(&self, iso_path: &Path, extract_path: &Path) -> Result<()> {
         // On Windows, we can use 7zip or other tools to extract ISO files
-        
+
         // Try 7zip first (most common)
         if let Ok(output) = Command::new("7z")
             .args([
                 "x", // Extract
                 iso_path.to_str().unwrap(),
                 &format!("-o{}", extract_path.display()),
-                "-y" // Yes to all prompts
+                "-y", // Yes to all prompts
             ])
             .output()
         {
@@ -152,7 +159,10 @@ impl IsoExtractor {
         std::fs::write(extract_path.join("boot/initrd"), b"placeholder initrd")?;
 
         // Create placeholder isolinux files
-        std::fs::write(extract_path.join("isolinux/isolinux.bin"), b"placeholder bootloader")?;
+        std::fs::write(
+            extract_path.join("isolinux/isolinux.bin"),
+            b"placeholder bootloader",
+        )?;
         std::fs::write(extract_path.join("isolinux/isolinux.cfg"), 
             "DEFAULT boot\nTIMEOUT 10\nLABEL boot\n  KERNEL /boot/vmlinuz\n  APPEND initrd=/boot/initrd")?;
 
@@ -162,10 +172,7 @@ impl IsoExtractor {
     pub fn verify_iso_structure(&self, extract_path: &Path) -> Result<()> {
         info!("Verifying extracted ISO structure");
 
-        let required_paths = [
-            "boot",
-            "isolinux",
-        ];
+        let required_paths = ["boot", "isolinux"];
 
         for path in &required_paths {
             let full_path = extract_path.join(path);
@@ -186,10 +193,8 @@ impl IsoExtractor {
             if let Ok(entries) = std::fs::read_dir(&boot_dir) {
                 let has_kernel = entries
                     .flatten()
-                    .any(|entry| {
-                        entry.file_name().to_string_lossy().starts_with("vmlinuz")
-                    });
-                
+                    .any(|entry| entry.file_name().to_string_lossy().starts_with("vmlinuz"));
+
                 if !has_kernel {
                     debug!("Warning: No kernel found in boot directory");
                 }

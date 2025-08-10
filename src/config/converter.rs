@@ -8,8 +8,8 @@ pub fn convert_json_to_isotope(input_path: &Path, output_path: &Path) -> Result<
     let json_content = fs::read_to_string(input_path)
         .with_context(|| format!("Failed to read JSON file: {}", input_path.display()))?;
 
-    let json_value: Value = serde_json::from_str(&json_content)
-        .with_context(|| "Failed to parse JSON content")?;
+    let json_value: Value =
+        serde_json::from_str(&json_content).with_context(|| "Failed to parse JSON content")?;
 
     let isotope_content = convert_json_value_to_isotope(&json_value)?;
 
@@ -27,11 +27,11 @@ fn convert_json_value_to_isotope(json: &Value) -> Result<String> {
         if let Some(path) = source.get("path").and_then(|v| v.as_str()) {
             isotope_lines.push(format!("FROM {}", path));
         }
-        
+
         if let Some(checksum) = source.get("checksum") {
             if let (Some(typ), Some(value)) = (
                 checksum.get("type").and_then(|v| v.as_str()),
-                checksum.get("value").and_then(|v| v.as_str())
+                checksum.get("value").and_then(|v| v.as_str()),
             ) {
                 isotope_lines.push(format!("CHECKSUM {}:{}", typ, value));
             }
@@ -56,7 +56,7 @@ fn convert_json_value_to_isotope(json: &Value) -> Result<String> {
     // Convert test VM configuration to init stage
     if let Some(test) = json.get("test") {
         isotope_lines.push("STAGE init".to_string());
-        
+
         if let Some(vm) = test.get("vm") {
             if let Some(provider) = vm.get("provider").and_then(|v| v.as_str()) {
                 isotope_lines.push(format!("VM provider={}", provider));
@@ -68,34 +68,41 @@ fn convert_json_value_to_isotope(json: &Value) -> Result<String> {
                 isotope_lines.push(format!("VM cpus={}", cpus));
             }
         }
-        
+
         if let Some(boot_wait) = test.get("boot_wait").and_then(|v| v.as_str()) {
             isotope_lines.push(format!("VM boot-wait={}", boot_wait));
         }
-        
+
         isotope_lines.push("".to_string());
     }
 
     // Convert GUI installation to os_install stage
     if let Some(gui) = json.get("gui_installation") {
-        if let Some(interactive) = gui.get("interactive_installation").and_then(|v| v.as_array()) {
+        if let Some(interactive) = gui
+            .get("interactive_installation")
+            .and_then(|v| v.as_array())
+        {
             isotope_lines.push("STAGE os_install".to_string());
-            
+
             for step in interactive {
                 if let Some(description) = step.get("description").and_then(|v| v.as_str()) {
                     isotope_lines.push(format!("# {}", description));
                 }
-                
+
                 if let Some(detection) = step.get("detection") {
-                    if let Some(timeout) = detection.get("wait_for_timeout").and_then(|v| v.as_str()) {
-                        if let Some(pattern) = detection.get("success_pattern").and_then(|v| v.as_str()) {
+                    if let Some(timeout) =
+                        detection.get("wait_for_timeout").and_then(|v| v.as_str())
+                    {
+                        if let Some(pattern) =
+                            detection.get("success_pattern").and_then(|v| v.as_str())
+                        {
                             isotope_lines.push(format!("WAIT {} FOR \"{}\"", timeout, pattern));
                         } else {
                             isotope_lines.push(format!("WAIT {}", timeout));
                         }
                     }
                 }
-                
+
                 if let Some(keypresses) = step.get("keypress_sequence").and_then(|v| v.as_array()) {
                     for keypress in keypresses {
                         if let Some(wait) = keypress.get("wait").and_then(|v| v.as_str()) {
@@ -106,12 +113,13 @@ fn convert_json_value_to_isotope(json: &Value) -> Result<String> {
                             } else {
                                 isotope_lines.push(format!("PRESS {}", key));
                             }
-                        } else if let Some(text) = keypress.get("key_text").and_then(|v| v.as_str()) {
+                        } else if let Some(text) = keypress.get("key_text").and_then(|v| v.as_str())
+                        {
                             isotope_lines.push(format!("TYPE \"{}\"", text));
                         }
                     }
                 }
-                
+
                 isotope_lines.push("".to_string());
             }
         }
@@ -121,7 +129,7 @@ fn convert_json_value_to_isotope(json: &Value) -> Result<String> {
     if let Some(test) = json.get("test") {
         if let Some(provision) = test.get("provision").and_then(|v| v.as_array()) {
             isotope_lines.push("STAGE os_configure".to_string());
-            
+
             for step in provision {
                 if let Some(script) = step.get("script").and_then(|v| v.as_str()) {
                     isotope_lines.push(format!("RUN bash {}", script));
@@ -133,26 +141,28 @@ fn convert_json_value_to_isotope(json: &Value) -> Result<String> {
                     }
                 }
             }
-            
+
             isotope_lines.push("".to_string());
         }
     }
 
     // Convert modifications to COPY instructions in os_configure stage (if not already present)
     if let Some(modifications) = json.get("modifications").and_then(|v| v.as_array()) {
-        let mut has_configure_stage = isotope_lines.iter().any(|line| line == "STAGE os_configure");
-        
+        let mut has_configure_stage = isotope_lines
+            .iter()
+            .any(|line| line == "STAGE os_configure");
+
         if !has_configure_stage {
             isotope_lines.push("STAGE os_configure".to_string());
         }
-        
+
         for modification in modifications {
             if let Some(mod_type) = modification.get("type").and_then(|v| v.as_str()) {
                 match mod_type {
                     "file_add" | "directory_add" => {
                         if let (Some(source), Some(destination)) = (
                             modification.get("source").and_then(|v| v.as_str()),
-                            modification.get("destination").and_then(|v| v.as_str())
+                            modification.get("destination").and_then(|v| v.as_str()),
                         ) {
                             isotope_lines.push(format!("COPY {} {}", source, destination));
                         }
@@ -161,22 +171,22 @@ fn convert_json_value_to_isotope(json: &Value) -> Result<String> {
                 }
             }
         }
-        
+
         isotope_lines.push("".to_string());
     }
 
     // Convert output to pack stage
     if let Some(output) = json.get("output") {
         isotope_lines.push("STAGE pack".to_string());
-        
+
         if let Some(path) = output.get("path").and_then(|v| v.as_str()) {
             isotope_lines.push(format!("EXPORT {}", path));
         }
-        
+
         if let Some(format) = output.get("format").and_then(|v| v.as_str()) {
             isotope_lines.push(format!("FORMAT {}", format));
         }
-        
+
         if let Some(options) = output.get("options") {
             if let Some(bootable) = options.get("bootable").and_then(|v| v.as_bool()) {
                 isotope_lines.push(format!("BOOTABLE {}", bootable));

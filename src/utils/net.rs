@@ -1,4 +1,4 @@
-use std::net::{TcpListener};
+use std::net::TcpListener;
 
 /// Find a random unoccupied port on localhost
 pub fn find_free_port() -> Option<u16> {

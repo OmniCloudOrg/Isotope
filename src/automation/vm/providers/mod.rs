@@ -2,8 +2,8 @@ pub mod virtualbox;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use std::path::Path;
 use image::DynamicImage;
+use std::path::Path;
 
 use crate::automation::vm::VmInstance;
 
@@ -27,8 +27,12 @@ pub trait VmProviderTrait: Send + Sync {
     fn get_ssh_endpoint(&self, instance: &VmInstance) -> (String, u16);
 }
 
-pub fn create_provider(provider_type: &crate::automation::vm::VmProvider) -> Box<dyn VmProviderTrait> {
+pub fn create_provider(
+    provider_type: &crate::automation::vm::VmProvider,
+) -> Box<dyn VmProviderTrait> {
     match provider_type {
-        crate::automation::vm::VmProvider::VirtualBox => Box::new(virtualbox::VirtualBoxProvider::new()),
+        crate::automation::vm::VmProvider::VirtualBox => {
+            Box::new(virtualbox::VirtualBoxProvider::new())
+        }
     }
 }

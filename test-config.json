@@ -1,0 +1,20 @@
+{
+  "source_iso": "./ubuntu-22.04.5-live-server-amd64.iso",
+  "output_iso": "./output/ubuntu-custom.iso",
+  "vm_config": {
+    "provider": "qemu",
+    "memory": "2G",
+    "cpus": 2,
+    "timeout": "30m"
+  },
+  "commands": [
+    {
+      "type": "RUN",
+      "value": "apt-get update"
+    },
+    {
+      "type": "RUN", 
+      "value": "apt-get install -y vim"
+    }
+  ]
+}

@@ -48,7 +48,6 @@ impl KeyboardMapper {
             ('x', vec!["2d", "ad"]),
             ('y', vec!["15", "95"]),
             ('z', vec!["2c", "ac"]),
-            
             // Numbers
             ('0', vec!["0b", "8b"]),
             ('1', vec!["02", "82"]),
@@ -60,7 +59,6 @@ impl KeyboardMapper {
             ('7', vec!["08", "88"]),
             ('8', vec!["09", "89"]),
             ('9', vec!["0a", "8a"]),
-            
             // Basic punctuation
             (' ', vec!["39", "b9"]),  // Space
             ('-', vec!["0c", "8c"]),  // Hyphen/minus
@@ -75,11 +73,12 @@ impl KeyboardMapper {
             ('.', vec!["34", "b4"]),  // Period/dot
             ('/', vec!["35", "b5"]),  // Forward slash
         ];
-        
+
         for (ch, scancodes) in basic_chars {
-            self.char_to_scancode.insert(ch, scancodes.iter().map(|s| s.to_string()).collect());
+            self.char_to_scancode
+                .insert(ch, scancodes.iter().map(|s| s.to_string()).collect());
         }
-        
+
         // Uppercase letters and shifted characters
         let shifted_chars = [
             // Uppercase letters (shift + letter)
@@ -109,40 +108,40 @@ impl KeyboardMapper {
             ('X', vec!["2a", "2d", "ad", "aa"]),
             ('Y', vec!["2a", "15", "95", "aa"]),
             ('Z', vec!["2a", "2c", "ac", "aa"]),
-            
             // Shifted numbers and symbols
-            ('!', vec!["2a", "02", "82", "aa"]),  // Shift+1
-            ('@', vec!["2a", "03", "83", "aa"]),  // Shift+2
-            ('#', vec!["2a", "04", "84", "aa"]),  // Shift+3
-            ('$', vec!["2a", "05", "85", "aa"]),  // Shift+4
-            ('%', vec!["2a", "06", "86", "aa"]),  // Shift+5
-            ('^', vec!["2a", "07", "87", "aa"]),  // Shift+6
-            ('&', vec!["2a", "08", "88", "aa"]),  // Shift+7
-            ('*', vec!["2a", "09", "89", "aa"]),  // Shift+8
-            ('(', vec!["2a", "0a", "8a", "aa"]),  // Shift+9
-            (')', vec!["2a", "0b", "8b", "aa"]),  // Shift+0
-            ('_', vec!["2a", "0c", "8c", "aa"]),  // Shift+-
-            ('+', vec!["2a", "0d", "8d", "aa"]),  // Shift+=
-            ('{', vec!["2a", "1a", "9a", "aa"]),  // Shift+[
-            ('}', vec!["2a", "1b", "9b", "aa"]),  // Shift+]
-            ('|', vec!["2a", "2b", "ab", "aa"]),  // Shift+\
-            (':', vec!["2a", "27", "a7", "aa"]),  // Shift+;
-            ('"', vec!["2a", "28", "a8", "aa"]),  // Shift+'
-            ('~', vec!["2a", "29", "a9", "aa"]),  // Shift+`
-            ('<', vec!["2a", "33", "b3", "aa"]),  // Shift+,
-            ('>', vec!["2a", "34", "b4", "aa"]),  // Shift+.
-            ('?', vec!["2a", "35", "b5", "aa"]),  // Shift+/
+            ('!', vec!["2a", "02", "82", "aa"]), // Shift+1
+            ('@', vec!["2a", "03", "83", "aa"]), // Shift+2
+            ('#', vec!["2a", "04", "84", "aa"]), // Shift+3
+            ('$', vec!["2a", "05", "85", "aa"]), // Shift+4
+            ('%', vec!["2a", "06", "86", "aa"]), // Shift+5
+            ('^', vec!["2a", "07", "87", "aa"]), // Shift+6
+            ('&', vec!["2a", "08", "88", "aa"]), // Shift+7
+            ('*', vec!["2a", "09", "89", "aa"]), // Shift+8
+            ('(', vec!["2a", "0a", "8a", "aa"]), // Shift+9
+            (')', vec!["2a", "0b", "8b", "aa"]), // Shift+0
+            ('_', vec!["2a", "0c", "8c", "aa"]), // Shift+-
+            ('+', vec!["2a", "0d", "8d", "aa"]), // Shift+=
+            ('{', vec!["2a", "1a", "9a", "aa"]), // Shift+[
+            ('}', vec!["2a", "1b", "9b", "aa"]), // Shift+]
+            ('|', vec!["2a", "2b", "ab", "aa"]), // Shift+\
+            (':', vec!["2a", "27", "a7", "aa"]), // Shift+;
+            ('"', vec!["2a", "28", "a8", "aa"]), // Shift+'
+            ('~', vec!["2a", "29", "a9", "aa"]), // Shift+`
+            ('<', vec!["2a", "33", "b3", "aa"]), // Shift+,
+            ('>', vec!["2a", "34", "b4", "aa"]), // Shift+.
+            ('?', vec!["2a", "35", "b5", "aa"]), // Shift+/
         ];
-        
+
         for (ch, scancodes) in shifted_chars {
-            self.char_to_scancode.insert(ch, scancodes.iter().map(|s| s.to_string()).collect());
+            self.char_to_scancode
+                .insert(ch, scancodes.iter().map(|s| s.to_string()).collect());
         }
     }
 
     /// Convert text to VirtualBox scancodes, supporting Unicode characters
     pub fn text_to_scancodes(&self, text: &str) -> Result<Vec<String>> {
         let mut scancodes = Vec::new();
-        
+
         for ch in text.chars() {
             if let Some(codes) = self.char_to_scancode.get(&ch) {
                 // Use the direct mapping for characters we have
@@ -152,39 +151,52 @@ impl KeyboardMapper {
                 scancodes.extend(self.handle_unicode_char(ch)?);
             }
         }
-        
+
         Ok(scancodes)
     }
 
     /// Handle Unicode characters that don't have direct scancode mappings
     fn handle_unicode_char(&self, ch: char) -> Result<Vec<String>> {
         debug!("Handling Unicode character: {} (U+{:04X})", ch, ch as u32);
-        
+
         // For now, try to decompose or find alternatives for common Unicode chars
         match ch {
             // Common Unicode punctuation that might appear in text
             '\u{2018}' | '\u{2019}' => self.char_to_scancode.get(&'\'').cloned(), // Smart quotes -> apostrophe
-            '\u{201C}' | '\u{201D}' => self.char_to_scancode.get(&'"').cloned(),  // Smart double quotes
-            '\u{2013}' | '\u{2014}' => self.char_to_scancode.get(&'-').cloned(),  // En dash, em dash -> hyphen
-            '\u{00A0}' => self.char_to_scancode.get(&' ').cloned(),              // Non-breaking space -> space
-            '\n' | '\r' => Some(vec!["1c".to_string(), "9c".to_string()]),       // Line feeds -> Enter
-            '\t' => Some(vec!["0f".to_string(), "8f".to_string()]),              // Tab
-            
+            '\u{201C}' | '\u{201D}' => self.char_to_scancode.get(&'"').cloned(), // Smart double quotes
+            '\u{2013}' | '\u{2014}' => self.char_to_scancode.get(&'-').cloned(), // En dash, em dash -> hyphen
+            '\u{00A0}' => self.char_to_scancode.get(&' ').cloned(), // Non-breaking space -> space
+            '\n' | '\r' => Some(vec!["1c".to_string(), "9c".to_string()]), // Line feeds -> Enter
+            '\t' => Some(vec!["0f".to_string(), "8f".to_string()]), // Tab
+
             // For other Unicode characters, we'll try to find the closest ASCII equivalent
             // or fall back to a placeholder
             _ => {
                 // Try to find a similar ASCII character
                 if let Some(ascii_equivalent) = self.find_ascii_equivalent(ch) {
-                    debug!("Using ASCII equivalent '{}' for Unicode char '{}'", ascii_equivalent, ch);
+                    debug!(
+                        "Using ASCII equivalent '{}' for Unicode char '{}'",
+                        ascii_equivalent, ch
+                    );
                     self.char_to_scancode.get(&ascii_equivalent).cloned()
                 } else {
                     // As a last resort, try to use Unicode input via ALT codes
                     // This is a fallback that may not work on all systems
-                    debug!("No mapping found for Unicode character '{}', using placeholder", ch);
+                    debug!(
+                        "No mapping found for Unicode character '{}', using placeholder",
+                        ch
+                    );
                     self.char_to_scancode.get(&'?').cloned() // Use '?' as placeholder
                 }
             }
-        }.ok_or_else(|| anyhow!("No scancode mapping available for character: {} (U+{:04X})", ch, ch as u32))
+        }
+        .ok_or_else(|| {
+            anyhow!(
+                "No scancode mapping available for character: {} (U+{:04X})",
+                ch,
+                ch as u32
+            )
+        })
     }
 
     /// Try to find an ASCII equivalent for a Unicode character
@@ -192,23 +204,25 @@ impl KeyboardMapper {
         // Simple mapping for common accented characters
         match ch {
             // Accented vowels -> unaccented
-            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' => Some('a'),
+            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' => {
+                Some('a')
+            }
             'è' | 'é' | 'ê' | 'ë' | 'È' | 'É' | 'Ê' | 'Ë' => Some('e'),
             'ì' | 'í' | 'î' | 'ï' | 'Ì' | 'Í' | 'Î' | 'Ï' => Some('i'),
             'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'Ò' | 'Ó' | 'Ô' | 'Õ' | 'Ö' => Some('o'),
             'ù' | 'ú' | 'û' | 'ü' | 'Ù' | 'Ú' | 'Û' | 'Ü' => Some('u'),
-            
+
             // Other accented characters
             'ç' | 'Ç' => Some('c'),
             'ñ' | 'Ñ' => Some('n'),
             'ý' | 'ÿ' | 'Ý' => Some('y'),
-            
+
             // Currency symbols
             '€' => Some('E'), // Euro
             '£' => Some('L'), // Pound
             '¥' => Some('Y'), // Yen
-            
-            _ => None
+
+            _ => None,
         }
     }
 
@@ -251,25 +265,53 @@ impl KeyboardMapper {
     /// Get modifier key scancodes
     pub fn modifier_to_scancodes(&self, modifier: &str, press: bool) -> Result<String> {
         let scancode = match modifier.to_lowercase().as_str() {
-            "ctrl" | "control" => if press { "1d" } else { "9d" },
-            "shift" => if press { "2a" } else { "aa" },
-            "alt" => if press { "38" } else { "b8" },
-            "meta" | "cmd" | "win" | "windows" => if press { "e0 5b" } else { "e0 db" },
+            "ctrl" | "control" => {
+                if press {
+                    "1d"
+                } else {
+                    "9d"
+                }
+            }
+            "shift" => {
+                if press {
+                    "2a"
+                } else {
+                    "aa"
+                }
+            }
+            "alt" => {
+                if press {
+                    "38"
+                } else {
+                    "b8"
+                }
+            }
+            "meta" | "cmd" | "win" | "windows" => {
+                if press {
+                    "e0 5b"
+                } else {
+                    "e0 db"
+                }
+            }
             _ => return Err(anyhow!("Unknown modifier key: {}", modifier)),
         };
-        
+
         Ok(scancode.to_string())
     }
 
     /// Handle complex key combinations with multiple modifiers
-    pub fn key_combination_to_scancodes(&self, modifiers: &[String], key: &str) -> Result<Vec<String>> {
+    pub fn key_combination_to_scancodes(
+        &self,
+        modifiers: &[String],
+        key: &str,
+    ) -> Result<Vec<String>> {
         let mut scancodes = Vec::new();
-        
+
         // Press all modifiers
         for modifier in modifiers {
             scancodes.push(self.modifier_to_scancodes(modifier, true)?);
         }
-        
+
         // Press and release the main key
         if key.len() == 1 {
             // Single character
@@ -286,12 +328,12 @@ impl KeyboardMapper {
             let key_scancodes = self.special_key_to_scancodes(key)?;
             scancodes.extend(key_scancodes);
         }
-        
+
         // Release all modifiers (in reverse order)
         for modifier in modifiers.iter().rev() {
             scancodes.push(self.modifier_to_scancodes(modifier, false)?);
         }
-        
+
         Ok(scancodes)
     }
 }
@@ -309,15 +351,15 @@ mod tests {
     #[test]
     fn test_basic_text_mapping() {
         let mapper = KeyboardMapper::new();
-        
+
         // Test basic ASCII text
         let result = mapper.text_to_scancodes("hello").unwrap();
         assert!(!result.is_empty());
-        
+
         // Test mixed case
         let result = mapper.text_to_scancodes("Hello").unwrap();
         assert!(!result.is_empty());
-        
+
         // Test numbers and symbols
         let result = mapper.text_to_scancodes("test123!@#").unwrap();
         assert!(!result.is_empty());
@@ -326,15 +368,15 @@ mod tests {
     #[test]
     fn test_special_keys() {
         let mapper = KeyboardMapper::new();
-        
+
         // Test function keys
         let result = mapper.special_key_to_scancodes("f1").unwrap();
         assert_eq!(result, vec!["3b", "bb"]);
-        
+
         // Test arrow keys
         let result = mapper.special_key_to_scancodes("up").unwrap();
         assert!(!result.is_empty());
-        
+
         // Test enter key
         let result = mapper.special_key_to_scancodes("enter").unwrap();
         assert_eq!(result, vec!["1c", "9c"]);
@@ -343,26 +385,30 @@ mod tests {
     #[test]
     fn test_key_combinations() {
         let mapper = KeyboardMapper::new();
-        
+
         // Test ctrl+c
         let modifiers = vec!["ctrl".to_string()];
-        let result = mapper.key_combination_to_scancodes(&modifiers, "c").unwrap();
+        let result = mapper
+            .key_combination_to_scancodes(&modifiers, "c")
+            .unwrap();
         assert!(!result.is_empty());
-        
+
         // Test ctrl+alt+t
         let modifiers = vec!["ctrl".to_string(), "alt".to_string()];
-        let result = mapper.key_combination_to_scancodes(&modifiers, "t").unwrap();
+        let result = mapper
+            .key_combination_to_scancodes(&modifiers, "t")
+            .unwrap();
         assert!(!result.is_empty());
     }
 
     #[test]
     fn test_unicode_fallback() {
         let mapper = KeyboardMapper::new();
-        
+
         // Test Unicode character with ASCII equivalent
         let result = mapper.text_to_scancodes("café").unwrap();
         assert!(!result.is_empty());
-        
+
         // Test smart quotes
         let result = mapper.text_to_scancodes("\"test\"").unwrap();
         assert!(!result.is_empty());

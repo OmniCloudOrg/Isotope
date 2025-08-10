@@ -81,7 +81,10 @@ fn validate_init_stage(stage: &Stage) -> Result<()> {
                 }
             }
             _ => {
-                return Err(anyhow!("Invalid instruction in init stage: {:?}", instruction));
+                return Err(anyhow!(
+                    "Invalid instruction in init stage: {:?}",
+                    instruction
+                ));
             }
         }
     }
@@ -109,7 +112,7 @@ fn validate_os_install_stage(stage: &Stage) -> Result<()> {
                 if key.is_empty() {
                     return Err(anyhow!("Press instruction requires a key"));
                 }
-                
+
                 // Validate modifiers if present
                 if let Some(modifier_list) = modifiers {
                     for modifier in modifier_list {
@@ -125,7 +128,10 @@ fn validate_os_install_stage(stage: &Stage) -> Result<()> {
                 }
             }
             _ => {
-                return Err(anyhow!("Invalid instruction in os_install stage: {:?}", instruction));
+                return Err(anyhow!(
+                    "Invalid instruction in os_install stage: {:?}",
+                    instruction
+                ));
             }
         }
     }
@@ -143,7 +149,10 @@ fn validate_os_configure_stage(stage: &Stage) -> Result<()> {
             }
             Instruction::Copy { from, to } => {
                 if !from.exists() {
-                    return Err(anyhow!("Copy source file does not exist: {}", from.display()));
+                    return Err(anyhow!(
+                        "Copy source file does not exist: {}",
+                        from.display()
+                    ));
                 }
                 if to.to_string_lossy().is_empty() {
                     return Err(anyhow!("Copy destination cannot be empty"));
@@ -158,7 +167,7 @@ fn validate_os_configure_stage(stage: &Stage) -> Result<()> {
                 if key.is_empty() {
                     return Err(anyhow!("Press instruction requires a key"));
                 }
-                
+
                 // Validate modifiers if present
                 if let Some(modifier_list) = modifiers {
                     for modifier in modifier_list {
@@ -179,7 +188,10 @@ fn validate_os_configure_stage(stage: &Stage) -> Result<()> {
                 }
             }
             _ => {
-                return Err(anyhow!("Invalid instruction in os_configure stage: {:?}", instruction));
+                return Err(anyhow!(
+                    "Invalid instruction in os_configure stage: {:?}",
+                    instruction
+                ));
             }
         }
     }
@@ -200,7 +212,10 @@ fn validate_pack_stage(stage: &Stage) -> Result<()> {
             }
             Instruction::Format { format } => {
                 if !["iso9660", "udf"].contains(&format.as_str()) {
-                    return Err(anyhow!("Invalid format: {}. Supported: iso9660, udf", format));
+                    return Err(anyhow!(
+                        "Invalid format: {}. Supported: iso9660, udf",
+                        format
+                    ));
                 }
             }
             Instruction::Bootable { .. } => {} // Always valid
@@ -213,7 +228,10 @@ fn validate_pack_stage(stage: &Stage) -> Result<()> {
                 }
             }
             _ => {
-                return Err(anyhow!("Invalid instruction in pack stage: {:?}", instruction));
+                return Err(anyhow!(
+                    "Invalid instruction in pack stage: {:?}",
+                    instruction
+                ));
             }
         }
     }
@@ -251,12 +269,20 @@ fn validate_stage_requirements(spec: &IsotopeSpec) -> Result<()> {
 fn is_valid_memory_size(size: &str) -> bool {
     let size_lower = size.to_lowercase();
     if size_lower.ends_with("m") || size_lower.ends_with("mb") {
-        if let Ok(num) = size_lower.trim_end_matches("mb").trim_end_matches("m").parse::<u64>() {
+        if let Ok(num) = size_lower
+            .trim_end_matches("mb")
+            .trim_end_matches("m")
+            .parse::<u64>()
+        {
             return num >= 512 && num <= 65536; // 512MB to 64GB
         }
     }
     if size_lower.ends_with("g") || size_lower.ends_with("gb") {
-        if let Ok(num) = size_lower.trim_end_matches("gb").trim_end_matches("g").parse::<u64>() {
+        if let Ok(num) = size_lower
+            .trim_end_matches("gb")
+            .trim_end_matches("g")
+            .parse::<u64>()
+        {
             return num >= 1 && num <= 64; // 1GB to 64GB
         }
     }
@@ -266,12 +292,20 @@ fn is_valid_memory_size(size: &str) -> bool {
 fn is_valid_disk_size(size: &str) -> bool {
     let size_lower = size.to_lowercase();
     if size_lower.ends_with("g") || size_lower.ends_with("gb") {
-        if let Ok(num) = size_lower.trim_end_matches("gb").trim_end_matches("g").parse::<u64>() {
+        if let Ok(num) = size_lower
+            .trim_end_matches("gb")
+            .trim_end_matches("g")
+            .parse::<u64>()
+        {
             return num >= 1 && num <= 1024; // 1GB to 1TB
         }
     }
     if size_lower.ends_with("t") || size_lower.ends_with("tb") {
-        if let Ok(num) = size_lower.trim_end_matches("tb").trim_end_matches("t").parse::<u64>() {
+        if let Ok(num) = size_lower
+            .trim_end_matches("tb")
+            .trim_end_matches("t")
+            .parse::<u64>()
+        {
             return num >= 1 && num <= 10; // 1TB to 10TB
         }
     }

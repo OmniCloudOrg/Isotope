@@ -1,6 +1,6 @@
+pub mod converter;
 pub mod parser;
 pub mod validator;
-pub mod converter;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -38,31 +38,60 @@ pub enum StageType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instruction {
     // VM Configuration (init stage)
-    Vm { key: String, value: String },
-    
+    Vm {
+        key: String,
+        value: String,
+    },
+
     // OS Installation (os_install stage)
-    Wait { duration: String, condition: Option<String> },
-    Press { key: String, repeat: Option<u32>, modifiers: Option<Vec<String>> },
-    Type { text: String },
-    
-    // OS Configuration (os_configure stage) 
-    Run { command: String },
-    Copy { from: PathBuf, to: PathBuf },
-    // SSH login configuration for remote operations  
-    Login { username: String, password: Option<String>, private_key: Option<PathBuf> },
-    
+    Wait {
+        duration: String,
+        condition: Option<String>,
+    },
+    Press {
+        key: String,
+        repeat: Option<u32>,
+        modifiers: Option<Vec<String>>,
+    },
+    Type {
+        text: String,
+    },
+
+    // OS Configuration (os_configure stage)
+    Run {
+        command: String,
+    },
+    Copy {
+        from: PathBuf,
+        to: PathBuf,
+    },
+    // SSH login configuration for remote operations
+    Login {
+        username: String,
+        password: Option<String>,
+        private_key: Option<PathBuf>,
+    },
+
     // Packaging (pack stage)
-    Export { path: PathBuf },
-    Format { format: String },
-    Bootable { enabled: bool },
-    VolumeLabel { label: String },
+    Export {
+        path: PathBuf,
+    },
+    Format {
+        format: String,
+    },
+    Bootable {
+        enabled: bool,
+    },
+    VolumeLabel {
+        label: String,
+    },
 }
 
 impl IsotopeSpec {
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let content = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read file: {}", path.as_ref().display()))?;
-        
+
         parser::parse_isotope_spec(&content)
             .with_context(|| format!("Failed to parse Isotope spec: {}", path.as_ref().display()))
     }
@@ -72,7 +101,9 @@ impl IsotopeSpec {
     }
 
     pub fn get_stage(&self, stage_type: &StageType) -> Option<&Stage> {
-        self.stages.iter().find(|s| std::mem::discriminant(&s.name) == std::mem::discriminant(stage_type))
+        self.stages
+            .iter()
+            .find(|s| std::mem::discriminant(&s.name) == std::mem::discriminant(stage_type))
     }
 
     pub fn get_label(&self, key: &str) -> Option<&String> {
