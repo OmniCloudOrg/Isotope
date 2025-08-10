@@ -138,15 +138,28 @@ fn parse_stage_instruction(instruction: &str, args: &str, line_num: usize) -> Re
             let mut repeat = None;
             let mut modifiers: Option<Vec<String>> = None;
             
-            // Check if this is a key combination (e.g., "ctrl+t")
+            // Check if this is a key combination (e.g., "ctrl+alt+t")
             if key_or_combo.contains('+') {
                 let combo_parts: Vec<&str> = key_or_combo.split('+').collect();
-                if combo_parts.len() == 2 {
-                    let modifier = combo_parts[0].to_lowercase();
-                    let key = combo_parts[1];
+                if combo_parts.len() >= 2 {
+                    // Last part is the key, others are modifiers
+                    let key = combo_parts.last().unwrap();
+                    let modifier_parts = &combo_parts[..combo_parts.len()-1];
                     
-                    // Validate that the first part is a known modifier
-                    if matches!(modifier.as_str(), "ctrl" | "alt" | "shift" | "meta" | "cmd") {
+                    // Validate that all modifier parts are known modifiers
+                    let mut valid_modifiers = Vec::new();
+                    for modifier in modifier_parts {
+                        let modifier_lower = modifier.to_lowercase();
+                        if matches!(modifier_lower.as_str(), "ctrl" | "control" | "alt" | "shift" | "meta" | "cmd" | "win" | "windows") {
+                            valid_modifiers.push(modifier_lower);
+                        } else {
+                            // Invalid modifier, treat as regular key
+                            break;
+                        }
+                    }
+                    
+                    // If all parts are valid modifiers, treat as key combination
+                    if valid_modifiers.len() == modifier_parts.len() {
                         // Check for repeat count
                         if let Some(next) = parts.next() {
                             if next == "repeat" || next == "x" {
@@ -159,7 +172,7 @@ fn parse_stage_instruction(instruction: &str, args: &str, line_num: usize) -> Re
                         return Ok(Instruction::Press {
                             key: key.to_string(),
                             repeat,
-                            modifiers: Some(vec![modifier]),
+                            modifiers: Some(valid_modifiers),
                         });
                     }
                 }

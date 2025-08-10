@@ -15,6 +15,7 @@ pub struct VmMetadataEntry {
     pub created_at: String, // ISO 8601 timestamp
     pub last_used: String,  // ISO 8601 timestamp
     pub provider: String,
+    pub ssh_port: Option<u16>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -66,27 +67,23 @@ impl VmMetadata {
     pub fn add_or_update_vm(&mut self, isotope_path: &Path, vm_instance: &VmInstance) -> Result<()> {
         let abs_path = isotope_path.canonicalize()
             .with_context(|| format!("Failed to resolve absolute path for {}", isotope_path.display()))?;
-        
         let now = chrono::Utc::now().to_rfc3339();
         let key = abs_path.to_string_lossy().to_string();
-        
         let entry = VmMetadataEntry {
             vm_name: vm_instance.name.clone(),
             vm_id: vm_instance.id.clone(),
             isotope_file: abs_path.clone(),
             created_at: if self.vms.contains_key(&key) {
-                // Keep original creation time
                 self.vms.get(&key).unwrap().created_at.clone()
             } else {
                 now.clone()
             },
             last_used: now,
             provider: format!("{:?}", vm_instance.provider),
+            ssh_port: Some(vm_instance.config.network_config.ssh_port),
         };
-
         info!("Tracking VM {} for isotope file {}", vm_instance.name, abs_path.display());
         self.vms.insert(key, entry);
-        
         Ok(())
     }
 
