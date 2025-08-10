@@ -158,7 +158,6 @@ PRESS enter
 
 # STAGE os_configure - Live OS configuration
 STAGE os_configure
-LOGIN ubuntu password=ubuntu host=127.0.0.1 port=22
 
 ## Wait for system to reboot and show login prompt
 # After reboot, Ubuntu takes time to start all services
@@ -179,34 +178,36 @@ PRESS enter
 # Wait for shell prompt to be ready
 WAIT 10s
 
+LOGIN ubuntu password=ubuntu host=127.0.0.1 port=22
+
 # Update system packages
-RUN sudo apt-get update
-RUN sudo apt-get upgrade -y
+RUN sudo -n apt-get update
+RUN sudo -n apt-get upgrade -y
 
 # Install Docker
-RUN sudo apt-get install -y docker.io
-RUN sudo systemctl enable docker
-RUN sudo systemctl start docker
-RUN sudo usermod -aG docker ubuntu
+RUN sudo -n apt-get install -y docker.io
+RUN sudo -n systemctl enable docker
+RUN sudo -n systemctl start docker
+RUN sudo -n usermod -aG docker ubuntu
 
 # Install additional tools
-RUN sudo apt-get install -y curl wget git vim htop neofetch
+RUN sudo -n apt-get install -y curl wget git vim htop neofetch
 
 # Copy custom configuration files
 COPY ./configs/docker-daemon.json /etc/docker/daemon.json
 COPY ./scripts/startup.sh /usr/local/bin/startup.sh
 
 # Make startup script executable and enable
-RUN sudo chmod +x /usr/local/bin/startup.sh
-RUN sudo ln -s /usr/local/bin/startup.sh /etc/rc.local
+RUN sudo -n chmod +x /usr/local/bin/startup.sh
+RUN sudo -n ln -s /usr/local/bin/startup.sh /etc/rc.local
 
 # Configure system settings
-RUN echo "export EDITOR=vim" | sudo tee -a /etc/profile
-RUN echo "alias ll='ls -la'" | sudo tee -a /etc/bash.bashrc
+RUN echo "export EDITOR=vim" | sudo -n tee -a /etc/profile
+RUN echo "alias ll='ls -la'" | sudo -n tee -a /etc/bash.bashrc
 
 # Configure Docker daemon
-RUN sudo systemctl restart docker
-RUN sudo systemctl status docker
+RUN sudo -n systemctl restart docker
+RUN sudo -n systemctl status docker
 
 # STAGE pack - Create final bootable ISO
 STAGE pack
