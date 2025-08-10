@@ -57,11 +57,25 @@ impl VirtualBoxProvider {
 impl VmProviderTrait for VirtualBoxProvider {
     fn get_ssh_endpoint(&self, instance: &VmInstance) -> (String, u16) {
         // For VirtualBox, we use port forwarding which maps localhost:HOST_PORT -> VM:22
-        // The ssh_port in the config is the HOST_PORT that's forwarded to the VM's port 22
-        (
-            "127.0.0.1".to_string(),
-            instance.config.network_config.ssh_port,
-        )
+        // Always query VirtualBox directly to get the actual forwarded port
+        match tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                self.get_ssh_port_from_vbox(&instance.name).await
+            })
+        }) {
+            Ok(Some(port)) => {
+                tracing::info!("VirtualBox SSH endpoint: 127.0.0.1:{} (queried from VBox)", port);
+                ("127.0.0.1".to_string(), port)
+            }
+            Ok(None) => {
+                tracing::warn!("No SSH port forwarding found for VM {}, falling back to default 22", instance.name);
+                ("127.0.0.1".to_string(), 22)
+            }
+            Err(e) => {
+                tracing::error!("Failed to query SSH port from VirtualBox for VM {}: {}, falling back to default 22", instance.name, e);
+                ("127.0.0.1".to_string(), 22)
+            }
+        }
     }
     async fn create_vm(&self, instance: &mut VmInstance) -> Result<()> {
         info!("Creating VirtualBox VM: {}", instance.name);
@@ -405,15 +419,6 @@ impl VmProviderTrait for VirtualBoxProvider {
         // Ensure VM is created first
         if !self.vm_exists(&instance.name).await? {
             self.create_vm(instance).await?;
-        } else {
-            // VM exists, but we need to ensure the instance has the correct SSH port
-            if let Some(actual_port) = self.get_ssh_port_from_vbox(&instance.name).await? {
-                if instance.config.network_config.ssh_port != actual_port {
-                    info!("Updating instance SSH port from {} to {} to match VirtualBox configuration", 
-                        instance.config.network_config.ssh_port, actual_port);
-                    instance.config.network_config.ssh_port = actual_port;
-                }
-            }
         }
 
         // Create IDE controller if it doesn't exist
@@ -697,7 +702,7 @@ impl VmProviderTrait for VirtualBoxProvider {
 
 impl VirtualBoxProvider {
     /// Get SSH port forwarding from VirtualBox VM configuration
-    async fn get_ssh_port_from_vbox(&self, vm_name: &str) -> Result<Option<u16>> {
+    pub async fn get_ssh_port_from_vbox(&self, vm_name: &str) -> Result<Option<u16>> {
         let output = self
             .vboxmanage_cmd()
             .args(["showvminfo", vm_name, "--machinereadable"])
@@ -711,11 +716,11 @@ impl VirtualBoxProvider {
         let output_str = String::from_utf8_lossy(&output.stdout);
         
         // Look for NAT port forwarding rule for SSH
-        // Format: natpf1="ssh,tcp,,PORT,,22"
+        // Format: Forwarding(0)="ssh,tcp,,PORT,,22"
         for line in output_str.lines() {
-            if line.starts_with("natpf1=") && line.contains("ssh,tcp") && line.contains(",,22") {
+            if line.contains("Forwarding(") && line.contains("ssh,tcp") && line.contains(",,22") {
                 // Extract the host port from the line
-                // Example: natpf1="ssh,tcp,,20000,,22"
+                // Example: Forwarding(0)="ssh,tcp,,20000,,22"
                 if let Some(start) = line.find(",,") {
                     if let Some(end) = line[start+2..].find(",,") {
                         let port_str = &line[start+2..start+2+end];

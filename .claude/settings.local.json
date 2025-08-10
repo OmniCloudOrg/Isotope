@@ -18,7 +18,9 @@
       "Bash(taskkill:*)",
       "Bash(powershell:*)",
       "Bash(VBoxManage.exe showvminfo:*)",
-      "Bash(VBoxManage.exe controlvm:*)"
+      "Bash(VBoxManage.exe controlvm:*)",
+      "Bash(VBoxManage.exe createvm:*)",
+      "Bash(VBoxManage.exe modifyvm:*)"
     ],
     "deny": []
   }
