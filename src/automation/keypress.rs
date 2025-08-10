@@ -4,7 +4,7 @@ use tokio::time::sleep;
 use tracing::{debug, info};
 
 use crate::automation::vm::{VmInstance, VmManager};
-use crate::automation::keyboard_input::KeyboardMapper;
+use crate::automation::library_keyboard_input::LibraryBasedKeyboardMapper;
 
 #[derive(Debug, Clone)]
 pub enum KeypressAction {
@@ -16,13 +16,13 @@ pub enum KeypressAction {
 
 pub struct KeypressExecutor {
     // Uses VM manager to send keys through the provider abstraction
-    keyboard_mapper: KeyboardMapper,
+    keyboard_mapper: LibraryBasedKeyboardMapper,
 }
 
 impl KeypressExecutor {
     pub fn new() -> Self {
         Self {
-            keyboard_mapper: KeyboardMapper::new(),
+            keyboard_mapper: LibraryBasedKeyboardMapper::new(),
         }
     }
 
@@ -48,7 +48,7 @@ impl KeypressExecutor {
         Ok(())
     }
 
-    async fn send_key(&self, vm: &VmInstance, key: &str, vm_manager: &VmManager) -> Result<()> {
+    async fn send_key(&mut self, vm: &VmInstance, key: &str, vm_manager: &VmManager) -> Result<()> {
         debug!("Sending key '{}' to VM {}", key, vm.name);
         
         // Use the enhanced keyboard mapper for special keys
@@ -63,7 +63,7 @@ impl KeypressExecutor {
         vm_manager.send_keys_to_vm(vm, &scancodes).await
     }
 
-    async fn send_key_combination(&self, vm: &VmInstance, modifiers: &[String], key: &str, vm_manager: &VmManager) -> Result<()> {
+    async fn send_key_combination(&mut self, vm: &VmInstance, modifiers: &[String], key: &str, vm_manager: &VmManager) -> Result<()> {
         debug!("Sending key combination '{:?}+{}' to VM {}", modifiers, key, vm.name);
         
         // Use the enhanced keyboard mapper for key combinations
@@ -71,7 +71,7 @@ impl KeypressExecutor {
         vm_manager.send_keys_to_vm(vm, &scancodes).await
     }
 
-    async fn type_text(&self, vm: &VmInstance, text: &str, vm_manager: &VmManager) -> Result<()> {
+    async fn type_text(&mut self, vm: &VmInstance, text: &str, vm_manager: &VmManager) -> Result<()> {
         info!("Typing text to VM {}: '{}'", vm.name, text);
         
         // Use the enhanced keyboard mapper for comprehensive text input
