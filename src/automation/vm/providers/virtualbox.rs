@@ -8,18 +8,18 @@ use tracing::{debug, info, trace, warn};
 use image::DynamicImage;
 
 use crate::automation::vm::{VmInstance, VmState};
-use crate::automation::keyboard_input::KeyboardMapper;
+use crate::automation::library_keyboard_input::LibraryBasedKeyboardMapper;
 use crate::utils::net;
 use super::VmProviderTrait;
 
 pub struct VirtualBoxProvider {
-    keyboard_mapper: KeyboardMapper,
+    keyboard_mapper: LibraryBasedKeyboardMapper,
 }
 
 impl VirtualBoxProvider {
     pub fn new() -> Self {
         Self {
-            keyboard_mapper: KeyboardMapper::new(),
+            keyboard_mapper: LibraryBasedKeyboardMapper::new(),
         }
     }
 

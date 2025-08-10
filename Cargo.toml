@@ -118,3 +118,7 @@ opt-level = 3
 [[bin]]
 name = "isotope"
 path = "src/main.rs"
+
+[lib]
+name = "isotope"
+path = "src/lib.rs"
