@@ -1,3 +1,4 @@
+use crate::utils::vm_metadata::VmMetadata;
 use anyhow::{anyhow, Context, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -91,18 +92,32 @@ impl VmManager {
     pub fn create_vm(&mut self) -> Result<VmInstance> {
         let vm_id = Uuid::new_v4().to_string();
         let vm_name = format!("isotope-vm-{}", &vm_id[..8]);
-        
         let instance = VmInstance::new(
             vm_id.clone(),
             vm_name,
             self.configured_provider,
             self.default_config.clone(),
         );
-
         self.instances.insert(vm_id.clone(), instance.clone());
-        
+        // Save to .isometa (if possible)
+        if let Some(isotope_path) = std::env::args().find(|a| a.ends_with(".isotope")) {
+            if let Ok(mut meta) = VmMetadata::load_from_current_dir() {
+                let _ = meta.add_or_update_vm(std::path::Path::new(&isotope_path), &instance);
+                let _ = meta.save_to_current_dir();
+            }
+        }
         info!("Created VM instance: {}", instance.name);
         Ok(instance)
+    }
+    /// Restore SSH port from .isometa if present (call this before resuming execution)
+    pub fn restore_ssh_port_from_metadata(&mut self, isotope_path: &Path, instance: &mut VmInstance) {
+        if let Ok(meta) = VmMetadata::load_from_current_dir() {
+            if let Some(entry) = meta.get_vm_for_isotope_file(isotope_path) {
+                if let Some(port) = entry.ssh_port {
+                    instance.config.network_config.ssh_port = port;
+                }
+            }
+        }
     }
 
     pub async fn attach_iso(&mut self, instance: &VmInstance, iso_path: &Path) -> Result<()> {
