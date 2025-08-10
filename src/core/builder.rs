@@ -348,17 +348,17 @@ impl Builder {
                     .await
                     .context("Failed to attach source ISO to VM")?;
 
-                // Get the updated VM instance after attach_iso (SSH port may have been updated)
-                let updated_vm_instance = vm_manager
-                    .get_instance(&vm_instance.id)
-                    .ok_or_else(|| anyhow!("VM instance not found after ISO attachment"))?
-                    .clone();
-
                 vm_manager
-                    .start_vm(&updated_vm_instance)
+                    .start_vm(&vm_instance)
                     .await
                     .context("Failed to start VM")?;
             }
+
+            // Get the updated VM instance (SSH port may have been updated during attach_iso)
+            let updated_vm_instance = vm_manager
+                .get_instance(&vm_instance.id)
+                .ok_or_else(|| anyhow!("VM instance not found after setup"))?
+                .clone();
 
             // Execute puppet automation
             let mut puppet_manager = self.puppet_manager.lock().await;
@@ -375,7 +375,7 @@ impl Builder {
                             "Target step {} is in {:?} stage, skipping os_install",
                             target_step, other_stage
                         );
-                        return Ok(Some(vm_instance)); // Skip this stage entirely
+                        return Ok(Some(updated_vm_instance)); // Skip this stage entirely
                     }
                 }
             } else {
@@ -384,7 +384,7 @@ impl Builder {
 
             puppet_manager
                 .execute_stage_instructions_from_step(
-                    &vm_instance,
+                    &updated_vm_instance,
                     os_install_stage,
                     &vm_manager,
                     continue_from,
@@ -393,9 +393,9 @@ impl Builder {
                 .context("Failed to execute OS installation instructions")?;
 
             // Save VM metadata for future --continue runs
-            self.save_vm_metadata(&vm_instance)?;
+            self.save_vm_metadata(&updated_vm_instance)?;
 
-            Ok(Some(vm_instance))
+            Ok(Some(updated_vm_instance))
         } else {
             warn!("No os_install stage found, skipping automated installation");
             Ok(None)
