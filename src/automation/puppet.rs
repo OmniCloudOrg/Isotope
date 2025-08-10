@@ -138,16 +138,14 @@ impl PuppetManager {
         // Check if this is a key combination with modifiers
         if let Some(modifier_list) = modifiers {
             if !modifier_list.is_empty() {
-                let modifier = &modifier_list[0]; // Use the first modifier for now
-                
                 for i in 0..repeat_count {
                     if repeat_count > 1 {
-                        debug!("Pressing key combination '{}+{}' ({}/{})", modifier, key, i + 1, repeat_count);
+                        debug!("Pressing key combination '{:?}+{}' ({}/{})", modifier_list, key, i + 1, repeat_count);
                     } else {
-                        debug!("Pressing key combination '{}+{}'", modifier, key);
+                        debug!("Pressing key combination '{:?}+{}'", modifier_list, key);
                     }
                     
-                    let action = KeypressAction::KeyCombo(modifier.clone(), key.to_string());
+                    let action = KeypressAction::KeyCombo(modifier_list.clone(), key.to_string());
                     self.keypress_executor.execute_action(vm, &action, vm_manager).await?;
                     
                     // Small delay between repeated keypresses
@@ -440,10 +438,11 @@ impl PuppetManager {
             // Handle key combinations
             key if key.contains("+") => {
                 let parts: Vec<&str> = key.split('+').collect();
-                if parts.len() == 2 {
-                    let modifier = parts[0];
-                    let base_key = parts[1];
-                    Ok(KeypressAction::KeyCombo(modifier.to_string(), base_key.to_string()))
+                if parts.len() >= 2 {
+                    // Last part is the key, everything else are modifiers
+                    let base_key = parts.last().unwrap();
+                    let modifiers: Vec<String> = parts[..parts.len()-1].iter().map(|s| s.to_string()).collect();
+                    Ok(KeypressAction::KeyCombo(modifiers, base_key.to_string()))
                 } else {
                     Err(anyhow!("Invalid key combination format: {}", key))
                 }

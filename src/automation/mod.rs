@@ -1,4 +1,5 @@
 pub mod keypress;
+pub mod keyboard_input;
 pub mod puppet;
 pub mod vm;
 pub mod ocr;

@@ -8,14 +8,19 @@ use tracing::{debug, info, trace, warn};
 use image::DynamicImage;
 
 use crate::automation::vm::{VmInstance, VmState};
+use crate::automation::keyboard_input::KeyboardMapper;
 use crate::utils::net;
 use super::VmProviderTrait;
 
-pub struct VirtualBoxProvider;
+pub struct VirtualBoxProvider {
+    keyboard_mapper: KeyboardMapper,
+}
 
 impl VirtualBoxProvider {
     pub fn new() -> Self {
-        Self
+        Self {
+            keyboard_mapper: KeyboardMapper::new(),
+        }
     }
 
     fn vboxmanage_cmd(&self) -> Command {
@@ -448,25 +453,20 @@ impl VmProviderTrait for VirtualBoxProvider {
     async fn send_keys(&self, instance: &VmInstance, keys: &[String]) -> Result<()> {
         debug!("Sending keys to VirtualBox VM: {:?}", keys);
 
-        for key in keys {
-            // Convert key to VirtualBox scancode format
-            let scancodes = self.key_to_scancodes(key)?;
-            
-            let output = self.vboxmanage_cmd()
-                .args([
-                    "controlvm", &instance.name,
-                    "keyboardputscancode"
-                ])
-                .args(scancodes.iter().map(|s| s.as_str()))
-                .output()
-                .context("Failed to send keyboard input")?;
+        // Keys are already converted to scancodes by our KeyboardMapper
+        // So we can send them directly to VirtualBox
+        let output = self.vboxmanage_cmd()
+            .args([
+                "controlvm", &instance.name,
+                "keyboardputscancode"
+            ])
+            .args(keys.iter().map(|s| s.as_str()))
+            .output()
+            .context("Failed to send keyboard input")?;
 
-            if !output.status.success() {
-                return Err(anyhow!("Failed to send key '{}': {}", 
-                    key, String::from_utf8_lossy(&output.stderr)));
-            }
-
-            sleep(Duration::from_millis(50)).await;
+        if !output.status.success() {
+            return Err(anyhow!("Failed to send keys: {}", 
+                String::from_utf8_lossy(&output.stderr)));
         }
 
         Ok(())
@@ -619,175 +619,5 @@ impl VirtualBoxProvider {
         }
         
         Ok(console_lines.join("\n"))
-    }
-}
-
-impl VirtualBoxProvider {
-    fn key_to_scancodes(&self, key: &str) -> Result<Vec<String>> {
-        // Handle key combinations like "ctrl+c"
-        if key.contains('+') {
-            return self.handle_key_combination(key);
-        }
-        
-        let scancodes = match key.to_lowercase().as_str() {
-            "enter" | "return" => vec!["1c", "9c"],
-            "tab" => vec!["0f", "8f"],
-            "space" => vec!["39", "b9"],
-            "esc" | "escape" => vec!["01", "81"],
-            "up" => vec!["48", "c8"],
-            "down" => vec!["50", "d0"],
-            "left" => vec!["4b", "cb"],
-            "right" => vec!["4d", "cd"],
-            "f1" => vec!["3b", "bb"],
-            "f2" => vec!["3c", "bc"],
-            "f3" => vec!["3d", "bd"],
-            "f4" => vec!["3e", "be"],
-            "f5" => vec!["3f", "bf"],
-            "f6" => vec!["40", "c0"],
-            "f7" => vec!["41", "c1"],
-            "f8" => vec!["42", "c2"],
-            "f9" => vec!["43", "c3"],
-            "f10" => vec!["44", "c4"],
-            "f11" => vec!["57", "d7"],
-            "f12" => vec!["58", "d8"],
-            // Character keys
-            "a" => vec!["1e", "9e"],
-            "b" => vec!["30", "b0"],
-            "c" => vec!["2e", "ae"],
-            "d" => vec!["20", "a0"],
-            "e" => vec!["12", "92"],
-            "f" => vec!["21", "a1"],
-            "g" => vec!["22", "a2"],
-            "h" => vec!["23", "a3"],
-            "i" => vec!["17", "97"],
-            "j" => vec!["24", "a4"],
-            "k" => vec!["25", "a5"],
-            "l" => vec!["26", "a6"],
-            "m" => vec!["32", "b2"],
-            "n" => vec!["31", "b1"],
-            "o" => vec!["18", "98"],
-            "p" => vec!["19", "99"],
-            "q" => vec!["10", "90"],
-            "r" => vec!["13", "93"],
-            "s" => vec!["1f", "9f"],
-            "t" => vec!["14", "94"],
-            "u" => vec!["16", "96"],
-            "v" => vec!["2f", "af"],
-            "w" => vec!["11", "91"],
-            "x" => vec!["2d", "ad"],
-            "y" => vec!["15", "95"],
-            "z" => vec!["2c", "ac"],
-            // Numbers
-            "0" => vec!["0b", "8b"],
-            "1" => vec!["02", "82"],
-            "2" => vec!["03", "83"],
-            "3" => vec!["04", "84"],
-            "4" => vec!["05", "85"],
-            "5" => vec!["06", "86"],
-            "6" => vec!["07", "87"],
-            "7" => vec!["08", "88"],
-            "8" => vec!["09", "89"],
-            "9" => vec!["0a", "8a"],
-            // Special characters
-            "-" => vec!["0c", "8c"],    // Hyphen/minus
-            "=" => vec!["0d", "8d"],    // Equals
-            "[" => vec!["1a", "9a"],    // Left bracket
-            "]" => vec!["1b", "9b"],    // Right bracket
-            "\\" => vec!["2b", "ab"],   // Backslash
-            ";" => vec!["27", "a7"],    // Semicolon
-            "'" => vec!["28", "a8"],    // Apostrophe/single quote
-            "`" => vec!["29", "a9"],    // Grave accent/backtick
-            "," => vec!["33", "b3"],    // Comma
-            "." => vec!["34", "b4"],    // Period/dot
-            "/" => vec!["35", "b5"],    // Forward slash
-            // Shifted characters (using shift scancode 2a for press, aa for release)
-            "!" => vec!["2a", "02", "82", "aa"],    // Shift+1
-            "@" => vec!["2a", "03", "83", "aa"],    // Shift+2
-            "#" => vec!["2a", "04", "84", "aa"],    // Shift+3
-            "$" => vec!["2a", "05", "85", "aa"],    // Shift+4
-            "%" => vec!["2a", "06", "86", "aa"],    // Shift+5
-            "^" => vec!["2a", "07", "87", "aa"],    // Shift+6
-            "&" => vec!["2a", "08", "88", "aa"],    // Shift+7
-            "*" => vec!["2a", "09", "89", "aa"],    // Shift+8
-            "(" => vec!["2a", "0a", "8a", "aa"],    // Shift+9
-            ")" => vec!["2a", "0b", "8b", "aa"],    // Shift+0
-            "_" => vec!["2a", "0c", "8c", "aa"],    // Shift+-
-            "+" => vec!["2a", "0d", "8d", "aa"],    // Shift+=
-            "{" => vec!["2a", "1a", "9a", "aa"],    // Shift+[
-            "}" => vec!["2a", "1b", "9b", "aa"],    // Shift+]
-            "|" => vec!["2a", "2b", "ab", "aa"],    // Shift+\
-            ":" => vec!["2a", "27", "a7", "aa"],    // Shift+;
-            "\"" => vec!["2a", "28", "a8", "aa"],   // Shift+'
-            "~" => vec!["2a", "29", "a9", "aa"],    // Shift+`
-            "<" => vec!["2a", "33", "b3", "aa"],    // Shift+,
-            ">" => vec!["2a", "34", "b4", "aa"],    // Shift+.
-            "?" => vec!["2a", "35", "b5", "aa"],    // Shift+/
-            // Uppercase letters (using shift)
-            "A" => vec!["2a", "1e", "9e", "aa"],
-            "B" => vec!["2a", "30", "b0", "aa"],
-            "C" => vec!["2a", "2e", "ae", "aa"],
-            "D" => vec!["2a", "20", "a0", "aa"],
-            "E" => vec!["2a", "12", "92", "aa"],
-            "F" => vec!["2a", "21", "a1", "aa"],
-            "G" => vec!["2a", "22", "a2", "aa"],
-            "H" => vec!["2a", "23", "a3", "aa"],
-            "I" => vec!["2a", "17", "97", "aa"],
-            "J" => vec!["2a", "24", "a4", "aa"],
-            "K" => vec!["2a", "25", "a5", "aa"],
-            "L" => vec!["2a", "26", "a6", "aa"],
-            "M" => vec!["2a", "32", "b2", "aa"],
-            "N" => vec!["2a", "31", "b1", "aa"],
-            "O" => vec!["2a", "18", "98", "aa"],
-            "P" => vec!["2a", "19", "99", "aa"],
-            "Q" => vec!["2a", "10", "90", "aa"],
-            "R" => vec!["2a", "13", "93", "aa"],
-            "S" => vec!["2a", "1f", "9f", "aa"],
-            "T" => vec!["2a", "14", "94", "aa"],
-            "U" => vec!["2a", "16", "96", "aa"],
-            "V" => vec!["2a", "2f", "af", "aa"],
-            "W" => vec!["2a", "11", "91", "aa"],
-            "X" => vec!["2a", "2d", "ad", "aa"],
-            "Y" => vec!["2a", "15", "95", "aa"],
-            "Z" => vec!["2a", "2c", "ac", "aa"],
-            _ => return Err(anyhow!("Unknown key for VirtualBox: {}", key)),
-        };
-
-        Ok(scancodes.into_iter().map(|s| s.to_string()).collect())
-    }
-
-    fn handle_key_combination(&self, combination: &str) -> Result<Vec<String>> {
-        let parts: Vec<&str> = combination.split('+').collect();
-        if parts.len() != 2 {
-            return Err(anyhow!("Invalid key combination format: {}", combination));
-        }
-
-        let modifier = parts[0].trim().to_lowercase();
-        let key = parts[1].trim().to_lowercase();
-
-        let mut scancodes = Vec::new();
-
-        // Add modifier press
-        let modifier_press = match modifier.as_str() {
-            "ctrl" | "control" => "1d",
-            "shift" => "2a",
-            "alt" => "38",
-            _ => return Err(anyhow!("Unknown modifier: {}", modifier)),
-        };
-        scancodes.push(modifier_press.to_string());
-
-        // Add key press and release
-        let key_scancodes = self.key_to_scancodes(&key)?;
-        scancodes.extend(key_scancodes);
-
-        // Add modifier release
-        let modifier_release = match modifier.as_str() {
-            "ctrl" | "control" => "9d",
-            "shift" => "aa", 
-            "alt" => "b8",
-            _ => return Err(anyhow!("Unknown modifier: {}", modifier)),
-        };
-        scancodes.push(modifier_release.to_string());
-
-        Ok(scancodes)
     }
 }
