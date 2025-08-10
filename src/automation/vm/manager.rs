@@ -24,14 +24,14 @@ impl VmManager {
             providers: HashMap::new(),
             working_dir: std::env::temp_dir().join("isotope-vms"),
             default_config: VmConfig::default(),
-            configured_provider: VmProvider::Qemu, // Default to QEMU
+            configured_provider: VmProvider::VirtualBox, // Only VirtualBox is supported
         }
     }
 
     pub fn configure_from_stage(&mut self, stage: &Stage) -> Result<()> {
         info!("Configuring VM from init stage");
         
-        let mut provider = VmProvider::Qemu; // Default
+        let mut provider = VmProvider::VirtualBox; // Only VirtualBox is supported
         let mut memory_mb = 2048;
         let mut cpus = 2;
         let mut disk_size_gb = 20;
@@ -43,13 +43,11 @@ impl VmManager {
             if let Instruction::Vm { key, value } = instruction {
                 match key.as_str() {
                     "provider" => {
-                        provider = match value.as_str() {
-                            "qemu" => VmProvider::Qemu,
-                            "virtualbox" => VmProvider::VirtualBox,
-                            "vmware" => VmProvider::VMware,
-                            "hyperv" => VmProvider::HyperV,
-                            _ => return Err(anyhow!("Unsupported VM provider: {}", value)),
-                        };
+                        // Only VirtualBox is supported now
+                        if value != "virtualbox" {
+                            return Err(anyhow!("Unsupported VM provider: {}. Only VirtualBox is supported.", value));
+                        }
+                        provider = VmProvider::VirtualBox;
                     }
                     "memory" => {
                         memory_mb = self.parse_memory_size(value)?;
@@ -85,7 +83,7 @@ impl VmManager {
             network_config: NetworkConfig::default(),
         };
 
-        info!("VM configured: {:?} with {}MB RAM, {} CPUs", provider, memory_mb, cpus);
+        info!("VM configured: VirtualBox with {}MB RAM, {} CPUs", memory_mb, cpus);
         self.configured_provider = provider;
         Ok(())
     }

@@ -16,10 +16,7 @@ pub struct VmInstance {
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum VmProvider {
-    Qemu,
     VirtualBox,
-    VMware,
-    HyperV,
 }
 
 impl std::str::FromStr for VmProvider {
@@ -27,12 +24,15 @@ impl std::str::FromStr for VmProvider {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "Qemu" => Ok(VmProvider::Qemu),
-            "VirtualBox" => Ok(VmProvider::VirtualBox),
-            "VMware" => Ok(VmProvider::VMware),
-            "HyperV" => Ok(VmProvider::HyperV),
-            _ => Err(anyhow::anyhow!("Unknown VM provider: {}", s)),
+            "virtualbox" => Ok(VmProvider::VirtualBox),
+            _ => Err(anyhow::anyhow!("Unsupported VM provider: {}. Only VirtualBox is supported.", s)),
         }
+    }
+}
+
+impl Default for VmProvider {
+    fn default() -> Self {
+        VmProvider::VirtualBox
     }
 }
 
