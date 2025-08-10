@@ -1,9 +1,10 @@
 use anyhow::{anyhow, Context, Result};
 use ssh2::Session;
 use std::collections::HashMap;
+use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::{sleep, timeout};
 use tracing::{debug, error, info, trace, warn};
 
@@ -26,16 +27,29 @@ pub struct PuppetManager {
     environment_vars: HashMap<String, String>,
     ocr_engine: OcrEngine,
     ssh_credentials: Option<SshCredentials>,
+    debug_steps_dir: PathBuf,
+    step_counter: usize,
 }
 
 impl PuppetManager {
     pub fn new() -> Self {
+        let debug_dir = std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join("debug-steps");
+        
+        // Create debug-steps directory if it doesn't exist
+        if !debug_dir.exists() {
+            let _ = fs::create_dir_all(&debug_dir);
+        }
+        
         Self {
             keypress_executor: KeypressExecutor::new(),
             template_engine: TemplateEngine::new(),
             environment_vars: std::env::vars().collect(),
             ocr_engine: OcrEngine::new(),
             ssh_credentials: None,
+            debug_steps_dir: debug_dir,
+            step_counter: 0,
         }
     }
 
@@ -79,12 +93,17 @@ impl PuppetManager {
         };
 
         for (i, instruction) in stage.instructions.iter().enumerate().skip(start_from) {
+            self.step_counter += 1;
             info!(
-                "Executing instruction {}/{}: {:?}",
+                "Executing instruction {}/{} (step {}): {:?}",
                 i + 1,
                 stage.instructions.len(),
+                self.step_counter,
                 instruction
             );
+
+            // Capture pre-step screenshot
+            self.capture_debug_screenshot(vm, "pre", self.step_counter, vm_manager).await?;
 
             match instruction {
                 // OS Installation instructions (keypress automation)
@@ -135,6 +154,9 @@ impl PuppetManager {
                     );
                 }
             }
+            
+            // Capture post-step screenshot
+            self.capture_debug_screenshot(vm, "post", self.step_counter, vm_manager).await?;
         }
 
         info!("Completed puppet execution for stage");
@@ -166,6 +188,8 @@ impl PuppetManager {
             match result {
                 Ok(Ok(())) => {
                     info!("Condition '{}' met successfully", condition_text);
+                    // Capture notice frame when condition is satisfied
+                    self.capture_debug_screenshot(vm, "notice", self.step_counter, vm_manager).await?;
                 }
                 Ok(Err(e)) => {
                     return Err(anyhow!(
@@ -672,5 +696,63 @@ impl PuppetManager {
         } else {
             Err(anyhow!("Invalid duration format: {}", duration))
         }
+    }
+
+    /// Capture debug screenshot and generate OCR text file
+    async fn capture_debug_screenshot(
+        &self,
+        vm: &VmInstance,
+        prefix: &str, // "pre", "post", or "notice"
+        step: usize,
+        vm_manager: &VmManager,
+    ) -> Result<()> {
+        debug!("Capturing {} screenshot for step {}", prefix, step);
+        
+        match vm_manager.capture_screen(vm).await {
+            Ok(image) => {
+                // Generate timestamp for unique filename
+                let timestamp = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                    
+                let filename_base = format!("{}-{}-{}", prefix, step, timestamp);
+                let image_path = self.debug_steps_dir.join(format!("{}.png", filename_base));
+                let text_path = self.debug_steps_dir.join(format!("{}.txt", filename_base));
+                
+                // Save screenshot
+                if let Err(e) = image.save(&image_path) {
+                    warn!("Failed to save debug screenshot {}: {}", image_path.display(), e);
+                    return Ok(());
+                }
+                
+                // Generate OCR text
+                match self.ocr_engine.extract_text(&image).await {
+                    Ok(ocr_text) => {
+                        if let Err(e) = fs::write(&text_path, &ocr_text) {
+                            warn!("Failed to save OCR text {}: {}", text_path.display(), e);
+                        } else {
+                            debug!(
+                                "Saved debug files: {} and {}",
+                                image_path.display(),
+                                text_path.display()
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to extract OCR text for step {}: {}", step, e);
+                        // Still save an empty text file to maintain file pairs
+                        let _ = fs::write(&text_path, format!("[OCR Error: {}]", e));
+                    }
+                }
+                
+                info!("Debug screenshot captured: {}", image_path.display());
+            }
+            Err(e) => {
+                warn!("Failed to capture screen for step {}: {}", step, e);
+            }
+        }
+        
+        Ok(())
     }
 }

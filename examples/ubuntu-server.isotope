@@ -103,25 +103,25 @@ PRESS tab
 PRESS enter
 WAIT 10s
 
-## Configure passwordless sudo for ubuntu user
-# Open a root shell to configure sudo access
-PRESS ctrl+alt+f2
-WAIT 3s
-# Login as root (installer environment)
-TYPE root
-PRESS enter
-WAIT 2s
-# Add ubuntu user to sudoers with NOPASSWD
-TYPE "echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /target/etc/sudoers.d/ubuntu"
-PRESS enter
-WAIT 2s
-# Set proper permissions for the sudoers file
-TYPE "chmod 440 /target/etc/sudoers.d/ubuntu"
-PRESS enter
-WAIT 2s
-# Return to installer
-PRESS ctrl+alt+f1
-WAIT 3s
+# ## Configure passwordless sudo for ubuntu user
+# # Open a root shell to configure sudo access
+# PRESS ctrl+alt+f2
+# WAIT 3s
+# # Login as root (installer environment)
+# TYPE root
+# PRESS enter
+# WAIT 2s
+# # Add ubuntu user to sudoers with NOPASSWD
+# TYPE "echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /target/etc/sudoers.d/ubuntu"
+# PRESS enter
+# WAIT 2s
+# # Set proper permissions for the sudoers file
+# TYPE "chmod 440 /target/etc/sudoers.d/ubuntu"
+# PRESS enter
+# WAIT 2s
+# # Return to installer
+# PRESS ctrl+alt+f1
+# WAIT 3s
 
 ## Ubuntu pro
 PRESS enter
@@ -160,7 +160,22 @@ PRESS enter
 STAGE os_configure
 
 # Wait for shell prompt to be ready
-WAIT 20s
+WAIT 20s FOR "login:"
+
+TYPE ubuntu
+PRESS enter
+TYPE ubuntu
+PRESS enter
+
+WAIT 2s
+
+# Add ubuntu user to sudoers with NOPASSWD
+TYPE "echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /target/etc/sudoers.d/ubuntu"
+PRESS enter
+WAIT 2s
+# Set proper permissions for the sudoers file
+TYPE "chmod 440 /target/etc/sudoers.d/ubuntu"
+PRESS enter
 
 LOGIN ubuntu password=ubuntu host=127.0.0.1 port=20000
 
