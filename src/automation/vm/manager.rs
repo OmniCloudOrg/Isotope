@@ -106,11 +106,23 @@ impl VmManager {
             self.default_config.clone(),
         );
         self.instances.insert(vm_id.clone(), instance.clone());
-        // Save to .isometa (if possible)
+        
+        // Clean up old VM metadata and VMs, then save new VM to .isometa
         if let Some(isotope_path) = std::env::args().find(|a| a.ends_with(".isotope")) {
             if let Ok(mut meta) = VmMetadata::load_from_current_dir() {
+                // Get old VM info before removing from metadata
+                if let Some(old_vm_entry) = meta.get_vm_for_isotope_file(std::path::Path::new(&isotope_path)) {
+                    info!("Found old VM {} from previous build, will clean up metadata", old_vm_entry.vm_name);
+                    // Note: We'll let VirtualBox handle the actual VM cleanup later
+                    // For now, just log that we're replacing the old VM entry
+                    warn!("Old VM {} will be replaced with new VM for fresh build", old_vm_entry.vm_name);
+                }
+                
+                // Remove old VM from metadata and add new one
+                let _ = meta.remove_vm(std::path::Path::new(&isotope_path));
                 let _ = meta.add_or_update_vm(std::path::Path::new(&isotope_path), &instance);
                 let _ = meta.save_to_current_dir();
+                info!("Cleaned up old VM metadata and registered new VM: {}", instance.name);
             }
         }
         info!("Created VM instance: {}", instance.name);
@@ -158,13 +170,7 @@ impl VmManager {
 
         let mut updated_instance = instance.clone();
 
-        // Create VM if not already created
-        provider
-            .create_vm(&mut updated_instance)
-            .await
-            .context("Failed to create VM")?;
-
-        // Start the VM
+        // Start the VM (it should already be created)
         provider
             .start_vm(&mut updated_instance)
             .await
@@ -270,6 +276,10 @@ impl VmManager {
         // If no existing VM found, create a new one
         info!("No compatible existing VM found, creating new instance");
         self.create_vm()
+    }
+
+    pub fn get_instance(&self, instance_id: &str) -> Option<&VmInstance> {
+        self.instances.get(instance_id)
     }
 
     pub async fn cleanup_all(&mut self) -> Result<()> {

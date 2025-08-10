@@ -95,7 +95,7 @@ impl LibraryBasedKeyboardMapper {
         // This is where we would integrate with the scancode crate
         // For now, implement a basic mapping for common ASCII characters
 
-        match ch {
+    match ch {
             // Letters (lowercase)
             'a'..='z' => {
                 let base_code = (ch as u8 - b'a') as u8;
@@ -141,6 +141,41 @@ impl LibraryBasedKeyboardMapper {
                     Err(anyhow!("Invalid digit"))
                 }
             }
+
+            // Special characters (US keyboard layout)
+            '`' => Ok(vec!["29".to_string(), "a9".to_string()]), // Backtick
+            '~' => Ok(vec!["2a".to_string(), "29".to_string(), "a9".to_string(), "aa".to_string()]), // Shift + backtick
+            '!' => Ok(vec!["2a".to_string(), "02".to_string(), "82".to_string(), "aa".to_string()]), // Shift + 1
+            '@' => Ok(vec!["2a".to_string(), "03".to_string(), "83".to_string(), "aa".to_string()]), // Shift + 2
+            '#' => Ok(vec!["2a".to_string(), "04".to_string(), "84".to_string(), "aa".to_string()]), // Shift + 3
+            '$' => Ok(vec!["2a".to_string(), "05".to_string(), "85".to_string(), "aa".to_string()]), // Shift + 4
+            '%' => Ok(vec!["2a".to_string(), "06".to_string(), "86".to_string(), "aa".to_string()]), // Shift + 5
+            '^' => Ok(vec!["2a".to_string(), "07".to_string(), "87".to_string(), "aa".to_string()]), // Shift + 6
+            '&' => Ok(vec!["2a".to_string(), "08".to_string(), "88".to_string(), "aa".to_string()]), // Shift + 7
+            '*' => Ok(vec!["2a".to_string(), "09".to_string(), "89".to_string(), "aa".to_string()]), // Shift + 8
+            '(' => Ok(vec!["2a".to_string(), "0a".to_string(), "8a".to_string(), "aa".to_string()]), // Shift + 9
+            ')' => Ok(vec!["2a".to_string(), "0b".to_string(), "8b".to_string(), "aa".to_string()]), // Shift + 0
+            '-' => Ok(vec!["0c".to_string(), "8c".to_string()]), // Hyphen/minus
+            '_' => Ok(vec!["2a".to_string(), "0c".to_string(), "8c".to_string(), "aa".to_string()]), // Shift + hyphen
+            // Equals sign '=' (US keyboard: 0x0d)
+            '=' => Ok(vec!["0d".to_string(), "8d".to_string()]),
+            '+' => Ok(vec!["2a".to_string(), "0d".to_string(), "8d".to_string(), "aa".to_string()]), // Shift + equals
+            '[' => Ok(vec!["1a".to_string(), "9a".to_string()]), // Left bracket
+            '{' => Ok(vec!["2a".to_string(), "1a".to_string(), "9a".to_string(), "aa".to_string()]), // Shift + left bracket
+            ']' => Ok(vec!["1b".to_string(), "9b".to_string()]), // Right bracket
+            '}' => Ok(vec!["2a".to_string(), "1b".to_string(), "9b".to_string(), "aa".to_string()]), // Shift + right bracket
+            '\\' => Ok(vec!["2b".to_string(), "ab".to_string()]), // Backslash
+            '|' => Ok(vec!["2a".to_string(), "2b".to_string(), "ab".to_string(), "aa".to_string()]), // Shift + backslash
+            ';' => Ok(vec!["27".to_string(), "a7".to_string()]), // Semicolon
+            ':' => Ok(vec!["2a".to_string(), "27".to_string(), "a7".to_string(), "aa".to_string()]), // Shift + semicolon
+            '\'' => Ok(vec!["28".to_string(), "a8".to_string()]), // Single quote
+            '"' => Ok(vec!["2a".to_string(), "28".to_string(), "a8".to_string(), "aa".to_string()]), // Shift + single quote
+            ',' => Ok(vec!["33".to_string(), "b3".to_string()]), // Comma
+            '<' => Ok(vec!["2a".to_string(), "33".to_string(), "b3".to_string(), "aa".to_string()]), // Shift + comma
+            '.' => Ok(vec!["34".to_string(), "b4".to_string()]), // Period
+            '>' => Ok(vec!["2a".to_string(), "34".to_string(), "b4".to_string(), "aa".to_string()]), // Shift + period
+            '/' => Ok(vec!["35".to_string(), "b5".to_string()]), // Forward slash
+            '?' => Ok(vec!["2a".to_string(), "35".to_string(), "b5".to_string(), "aa".to_string()]), // Shift + forward slash
 
             _ => Err(anyhow!("Character not supported by library mapping")),
         }
@@ -325,5 +360,13 @@ mod tests {
         // Test Unicode character with ASCII equivalent
         let result = mapper.text_to_scancodes("café").unwrap();
         assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_equals_sign_mapping() {
+        let mut mapper = LibraryBasedKeyboardMapper::new();
+        let result = mapper.text_to_scancodes("=").unwrap();
+        // 0x0d = make, 0x8d = break for '=' on US keyboard
+        assert_eq!(result, vec!["0d", "8d"]);
     }
 }

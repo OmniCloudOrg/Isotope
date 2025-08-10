@@ -169,15 +169,18 @@ PRESS enter
 
 WAIT 2s
 
-# Add ubuntu user to sudoers with NOPASSWD
-TYPE "echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /target/etc/sudoers.d/ubuntu"
+TYPE "sudo mkdir -p /etc/sudoers.d"
 PRESS enter
-WAIT 2s
-# Set proper permissions for the sudoers file
-TYPE "chmod 440 /target/etc/sudoers.d/ubuntu"
+TYPE "ubuntu"
+PRESS enter
+WAIT 1s
+TYPE "echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/ubuntu"
+PRESS enter
+WAIT 1s
+TYPE "sudo chmod 440 /etc/sudoers.d/ubuntu"
 PRESS enter
 
-LOGIN ubuntu password=ubuntu host=127.0.0.1 port=20000
+LOGIN ubuntu password=ubuntu
 
 # Update system packages
 RUN sudo -n apt-get update

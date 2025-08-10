@@ -7,7 +7,10 @@
       "Bash(rustc:*)",
       "Bash(./test_modifier_parsing.exe)",
       "Bash(cargo run:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(VBoxManage showvminfo:*)",
+      "Bash(VBoxManage list:*)",
+      "Bash(cargo test:*)"
     ],
     "deny": []
   }

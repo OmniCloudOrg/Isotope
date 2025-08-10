@@ -307,19 +307,18 @@ impl Builder {
         if let Some(os_install_stage) = self.spec.get_stage(&StageType::OsInstall) {
             let mut vm_manager = self.vm_manager.lock().await;
 
-            // Check if we should reuse an existing VM when continuing
+            // Check if we should reuse an existing VM (only when using --continue-from)
             let vm_instance = if self.continue_from_step.is_some() {
                 if let Some(existing_vm) = self.get_existing_vm_from_metadata()? {
-                    info!("Reusing existing VM {} for --continue", existing_vm.name);
+                    info!("Reusing existing VM {} for --continue-from", existing_vm.name);
                     existing_vm
                 } else {
-                    info!("No existing VM found for --continue, creating new VM");
-                    vm_manager
-                        .create_vm()
-                        .context("Failed to create VM instance")?
+                    return Err(anyhow!(
+                        "Cannot continue: no existing VM found in metadata. Run without --continue-from first."
+                    ));
                 }
             } else {
-                // Normal run, create new VM
+                info!("Creating new VM (not continuing from previous build)");
                 vm_manager
                     .create_vm()
                     .context("Failed to create VM instance")?
@@ -349,8 +348,14 @@ impl Builder {
                     .await
                     .context("Failed to attach source ISO to VM")?;
 
+                // Get the updated VM instance after attach_iso (SSH port may have been updated)
+                let updated_vm_instance = vm_manager
+                    .get_instance(&vm_instance.id)
+                    .ok_or_else(|| anyhow!("VM instance not found after ISO attachment"))?
+                    .clone();
+
                 vm_manager
-                    .start_vm(&vm_instance)
+                    .start_vm(&updated_vm_instance)
                     .await
                     .context("Failed to start VM")?;
             }

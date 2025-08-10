@@ -69,9 +69,46 @@ impl VmProviderTrait for VirtualBoxProvider {
         // Check if VM already exists
         if self.vm_exists(&instance.name).await? {
             info!(
-                "VirtualBox VM {} already exists, using configured SSH port: {}",
-                instance.name, instance.config.network_config.ssh_port
+                "VirtualBox VM {} already exists, checking SSH port forwarding",
+                instance.name
             );
+            
+            // Check if SSH port forwarding exists
+            if let Some(actual_port) = self.get_ssh_port_from_vbox(&instance.name).await? {
+                instance.config.network_config.ssh_port = actual_port;
+                info!("Found existing SSH port forwarding: {}", actual_port);
+            } else {
+                // No port forwarding exists, find a free port and set it up
+                let ssh_host_port = net::find_free_port()
+                    .ok_or_else(|| anyhow!("No free port found for SSH forwarding"))?;
+                
+                info!("No SSH port forwarding found, setting up port forwarding to port {}", ssh_host_port);
+                
+                // Update the instance config with the found port
+                instance.config.network_config.ssh_port = ssh_host_port;
+                
+                // Set up port forwarding for SSH
+                let output = self
+                    .vboxmanage_cmd()
+                    .args([
+                        "modifyvm",
+                        &instance.name,
+                        "--natpf1",
+                        &format!("ssh,tcp,,{},,22", ssh_host_port),
+                    ])
+                    .output()
+                    .context("Failed to set up port forwarding for SSH")?;
+                
+                if !output.status.success() {
+                    return Err(anyhow!(
+                        "Failed to set up port forwarding: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    ));
+                } else {
+                    info!("Successfully set up SSH port forwarding: {}", ssh_host_port);
+                }
+            }
+            
             instance.set_state(VmState::Stopped);
             return Ok(());
         }
@@ -650,6 +687,40 @@ impl VmProviderTrait for VirtualBoxProvider {
 }
 
 impl VirtualBoxProvider {
+    /// Get SSH port forwarding from VirtualBox VM configuration
+    async fn get_ssh_port_from_vbox(&self, vm_name: &str) -> Result<Option<u16>> {
+        let output = self
+            .vboxmanage_cmd()
+            .args(["showvminfo", vm_name, "--machinereadable"])
+            .output()
+            .context("Failed to get VM info")?;
+
+        if !output.status.success() {
+            return Ok(None);
+        }
+
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        
+        // Look for NAT port forwarding rule for SSH
+        // Format: natpf1="ssh,tcp,,PORT,,22"
+        for line in output_str.lines() {
+            if line.starts_with("natpf1=") && line.contains("ssh,tcp") && line.contains(",,22") {
+                // Extract the host port from the line
+                // Example: natpf1="ssh,tcp,,20000,,22"
+                if let Some(start) = line.find(",,") {
+                    if let Some(end) = line[start+2..].find(",,") {
+                        let port_str = &line[start+2..start+2+end];
+                        if let Ok(port) = port_str.parse::<u16>() {
+                            return Ok(Some(port));
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(None)
+    }
+
     async fn configure_console_output(
         &self,
         instance: &VmInstance,
