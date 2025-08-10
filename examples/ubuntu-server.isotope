@@ -159,26 +159,10 @@ PRESS enter
 # STAGE os_configure - Live OS configuration
 STAGE os_configure
 
-## Wait for system to reboot and show login prompt
-# After reboot, Ubuntu takes time to start all services
-# Look for a more unique phrase or full prompt
-WAIT 3m FOR "ubuntu-server login:"  # Use full prompt if possible
-
-# Login with the ubuntu user we created
-TYPE ubuntu
-PRESS enter
-WAIT 2s
-TYPE ubuntu
-PRESS enter
-WAIT 5s
-
-TYPE ls
-PRESS enter
-
 # Wait for shell prompt to be ready
-WAIT 10s
+WAIT 20s
 
-LOGIN ubuntu password=ubuntu host=127.0.0.1 port=22
+LOGIN ubuntu password=ubuntu host=127.0.0.1 port=20000
 
 # Update system packages
 RUN sudo -n apt-get update
