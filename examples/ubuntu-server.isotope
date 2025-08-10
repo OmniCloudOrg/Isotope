@@ -160,7 +160,7 @@ PRESS enter
 STAGE os_configure
 
 # Wait for shell prompt to be ready
-WAIT 20s FOR "login:"
+WAIT 2m FOR "login:"
 
 TYPE ubuntu
 PRESS enter

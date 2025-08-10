@@ -27,3 +27,4 @@ target/
 .claude/settings.local.json
 /.claude
 .isometa
+/debug-steps

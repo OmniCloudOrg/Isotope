@@ -458,9 +458,13 @@ impl PuppetManager {
                 "No SSH credentials configured. Use LOGIN instruction first."
             ));
         }
+        
         // Get endpoint from provider
         let provider = crate::automation::vm::providers::create_provider(&vm.provider);
         let (host, port) = provider.get_ssh_endpoint(vm);
+        
+        info!("SSH connection details: {}:{}", host, port);
+        
         let credentials = self.ssh_credentials.as_ref().unwrap().clone();
         let command_clone = command.to_string();
         tokio::task::spawn_blocking(move || {
@@ -476,11 +480,14 @@ impl PuppetManager {
         port: u16,
         command: &str,
     ) -> Result<()> {
+        // Attempt TCP connection with detailed error info
         let tcp = std::net::TcpStream::connect(format!("{}:{}", host, port))
-            .context("Failed to connect to VM via SSH")?;
+            .context(format!("Failed to connect to VM via SSH at {}:{}", host, port))?;
+            
         let mut sess = Session::new().context("Failed to create SSH session")?;
         sess.set_tcp_stream(tcp);
-        sess.handshake().context("SSH handshake failed")?;
+        sess.handshake()
+            .context(format!("SSH handshake failed to {}:{}", host, port))?;
         // Try authentication methods in order of preference
         if let Some(ref private_key_path) = credentials.private_key {
             if private_key_path.exists() {
@@ -552,6 +559,9 @@ impl PuppetManager {
         let to_path = to.to_path_buf();
         let provider = crate::automation::vm::providers::create_provider(&vm.provider);
         let (host, port) = provider.get_ssh_endpoint(vm);
+        
+        info!("SCP connection details: {}:{}", host, port);
+        
         tokio::task::spawn_blocking(move || {
             Self::scp_copy_file_with_endpoint(&credentials, &host, port, &from_path, &to_path)
         })
@@ -567,11 +577,11 @@ impl PuppetManager {
         to: &Path,
     ) -> Result<()> {
         let tcp = std::net::TcpStream::connect(format!("{}:{}", host, port))
-            .context("Failed to connect to VM via SSH for file transfer")?;
+            .context(format!("Failed to connect to VM via SSH for file transfer at {}:{}", host, port))?;
         let mut sess = Session::new().context("Failed to create SSH session for file transfer")?;
         sess.set_tcp_stream(tcp);
         sess.handshake()
-            .context("SSH handshake failed for file transfer")?;
+            .context(format!("SSH handshake failed for file transfer to {}:{}", host, port))?;
         // Try authentication methods in order of preference
         if let Some(ref private_key_path) = credentials.private_key {
             if private_key_path.exists() {

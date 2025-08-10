@@ -130,6 +130,14 @@ impl Builder {
 
             // Create a VmInstance from the metadata - we'll assume it exists for now
             // The actual VM status check will happen when we try to use it
+            let mut config = crate::automation::vm::VmConfig::default();
+            
+            // Restore SSH port from metadata if available
+            if let Some(ssh_port) = vm_entry.ssh_port {
+                config.network_config.ssh_port = ssh_port;
+                info!("Restored SSH port from metadata: {}", ssh_port);
+            }
+            
             let vm_instance = VmInstance::new(
                 vm_entry.vm_id.clone(),
                 vm_entry.vm_name.clone(),
@@ -137,8 +145,7 @@ impl Builder {
                     .provider
                     .parse()
                     .map_err(|_| anyhow!("Invalid provider: {}", vm_entry.provider))?,
-                // We'll use default config since we don't store it
-                crate::automation::vm::VmConfig::default(),
+                config,
             );
 
             info!("Will attempt to reuse existing VM {}", vm_entry.vm_name);

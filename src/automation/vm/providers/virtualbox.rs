@@ -56,28 +56,8 @@ impl VirtualBoxProvider {
 #[async_trait]
 impl VmProviderTrait for VirtualBoxProvider {
     fn get_ssh_endpoint(&self, instance: &VmInstance) -> (String, u16) {
-        // Try to get the VM's real IP using VBoxManage guestproperty
-        let output = self
-            .vboxmanage_cmd()
-            .args([
-                "guestproperty",
-                "get",
-                &instance.name,
-                "/VirtualBox/GuestInfo/Net/0/V4/IP",
-            ])
-            .output();
-        if let Ok(output) = output {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if let Some(ip) = stdout.strip_prefix("Value: ") {
-                    let ip = ip.trim().to_string();
-                    if !ip.is_empty() && ip != "null" {
-                        return (ip, 22);
-                    }
-                }
-            }
-        }
-        // Fallback to 127.0.0.1 and forwarded port
+        // For VirtualBox, we use port forwarding which maps localhost:HOST_PORT -> VM:22
+        // The ssh_port in the config is the HOST_PORT that's forwarded to the VM's port 22
         (
             "127.0.0.1".to_string(),
             instance.config.network_config.ssh_port,
@@ -89,8 +69,8 @@ impl VmProviderTrait for VirtualBoxProvider {
         // Check if VM already exists
         if self.vm_exists(&instance.name).await? {
             info!(
-                "VirtualBox VM {} already exists, skipping creation",
-                instance.name
+                "VirtualBox VM {} already exists, using configured SSH port: {}",
+                instance.name, instance.config.network_config.ssh_port
             );
             instance.set_state(VmState::Stopped);
             return Ok(());
