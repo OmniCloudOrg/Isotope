@@ -68,8 +68,8 @@ impl PuppetManager {
                 Instruction::Wait { duration, condition } => {
                     self.execute_wait_instruction(vm, duration, condition.as_ref(), vm_manager).await?;
                 }
-                Instruction::Press { key, repeat } => {
-                    self.execute_press_instruction(vm, key, *repeat, vm_manager).await?;
+                Instruction::Press { key, repeat, modifiers } => {
+                    self.execute_press_instruction(vm, key, *repeat, modifiers, vm_manager).await?;
                 }
                 Instruction::Type { text } => {
                     self.execute_type_instruction(vm, text, vm_manager).await?;
@@ -132,9 +132,34 @@ impl PuppetManager {
         Ok(())
     }
 
-    async fn execute_press_instruction(&mut self, vm: &VmInstance, key: &str, repeat: Option<u32>, vm_manager: &VmManager) -> Result<()> {
+    async fn execute_press_instruction(&mut self, vm: &VmInstance, key: &str, repeat: Option<u32>, modifiers: &Option<Vec<String>>, vm_manager: &VmManager) -> Result<()> {
         let repeat_count = repeat.unwrap_or(1);
         
+        // Check if this is a key combination with modifiers
+        if let Some(modifier_list) = modifiers {
+            if !modifier_list.is_empty() {
+                let modifier = &modifier_list[0]; // Use the first modifier for now
+                
+                for i in 0..repeat_count {
+                    if repeat_count > 1 {
+                        debug!("Pressing key combination '{}+{}' ({}/{})", modifier, key, i + 1, repeat_count);
+                    } else {
+                        debug!("Pressing key combination '{}+{}'", modifier, key);
+                    }
+                    
+                    let action = KeypressAction::KeyCombo(modifier.clone(), key.to_string());
+                    self.keypress_executor.execute_action(vm, &action, vm_manager).await?;
+                    
+                    // Small delay between repeated keypresses
+                    if i < repeat_count - 1 {
+                        sleep(Duration::from_millis(100)).await;
+                    }
+                }
+                return Ok(());
+            }
+        }
+        
+        // Regular key press
         for i in 0..repeat_count {
             if repeat_count > 1 {
                 debug!("Pressing key '{}' ({}/{})", key, i + 1, repeat_count);

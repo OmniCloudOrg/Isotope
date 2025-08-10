@@ -134,10 +134,38 @@ fn parse_stage_instruction(instruction: &str, args: &str, line_num: usize) -> Re
         }
         "PRESS" => {
             let mut parts = args.split_whitespace();
-            let key = parts.next().unwrap_or("").to_string();
+            let key_or_combo = parts.next().unwrap_or("").to_string();
             let mut repeat = None;
+            let mut modifiers: Option<Vec<String>> = None;
             
-            // Check for repeat count
+            // Check if this is a key combination (e.g., "ctrl+t")
+            if key_or_combo.contains('+') {
+                let combo_parts: Vec<&str> = key_or_combo.split('+').collect();
+                if combo_parts.len() == 2 {
+                    let modifier = combo_parts[0].to_lowercase();
+                    let key = combo_parts[1];
+                    
+                    // Validate that the first part is a known modifier
+                    if matches!(modifier.as_str(), "ctrl" | "alt" | "shift" | "meta" | "cmd") {
+                        // Check for repeat count
+                        if let Some(next) = parts.next() {
+                            if next == "repeat" || next == "x" {
+                                if let Some(count_str) = parts.next() {
+                                    repeat = count_str.parse().ok();
+                                }
+                            }
+                        }
+                        
+                        return Ok(Instruction::Press {
+                            key: key.to_string(),
+                            repeat,
+                            modifiers: Some(vec![modifier]),
+                        });
+                    }
+                }
+            }
+            
+            // Regular key press - check for repeat count
             if let Some(next) = parts.next() {
                 if next == "repeat" || next == "x" {
                     if let Some(count_str) = parts.next() {
@@ -146,7 +174,11 @@ fn parse_stage_instruction(instruction: &str, args: &str, line_num: usize) -> Re
                 }
             }
             
-            Ok(Instruction::Press { key, repeat })
+            Ok(Instruction::Press { 
+                key: key_or_combo, 
+                repeat,
+                modifiers: None,
+            })
         }
         "TYPE" => {
             Ok(Instruction::Type {

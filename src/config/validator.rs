@@ -105,9 +105,18 @@ fn validate_os_install_stage(stage: &Stage) -> Result<()> {
                     return Err(anyhow!("Invalid wait duration: {}", duration));
                 }
             }
-            Instruction::Press { key, .. } => {
+            Instruction::Press { key, modifiers, .. } => {
                 if key.is_empty() {
                     return Err(anyhow!("Press instruction requires a key"));
+                }
+                
+                // Validate modifiers if present
+                if let Some(modifier_list) = modifiers {
+                    for modifier in modifier_list {
+                        if !matches!(modifier.as_str(), "ctrl" | "alt" | "shift" | "meta" | "cmd") {
+                            return Err(anyhow!("Invalid modifier: {}", modifier));
+                        }
+                    }
                 }
             }
             Instruction::Type { text } => {
@@ -145,14 +154,28 @@ fn validate_os_configure_stage(stage: &Stage) -> Result<()> {
                     return Err(anyhow!("Invalid wait duration: {}", duration));
                 }
             }
-            Instruction::Press { key, .. } => {
+            Instruction::Press { key, modifiers, .. } => {
                 if key.is_empty() {
                     return Err(anyhow!("Press instruction requires a key"));
+                }
+                
+                // Validate modifiers if present
+                if let Some(modifier_list) = modifiers {
+                    for modifier in modifier_list {
+                        if !matches!(modifier.as_str(), "ctrl" | "alt" | "shift" | "meta" | "cmd") {
+                            return Err(anyhow!("Invalid modifier: {}", modifier));
+                        }
+                    }
                 }
             }
             Instruction::Type { text } => {
                 if text.is_empty() {
                     return Err(anyhow!("Type instruction requires text"));
+                }
+            }
+            Instruction::Login { username, .. } => {
+                if username.is_empty() {
+                    return Err(anyhow!("Login instruction requires a username"));
                 }
             }
             _ => {

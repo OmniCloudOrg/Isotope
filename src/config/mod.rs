@@ -42,7 +42,7 @@ pub enum Instruction {
     
     // OS Installation (os_install stage)
     Wait { duration: String, condition: Option<String> },
-    Press { key: String, repeat: Option<u32> },
+    Press { key: String, repeat: Option<u32>, modifiers: Option<Vec<String>> },
     Type { text: String },
     
     // OS Configuration (os_configure stage) 

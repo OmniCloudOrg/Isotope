@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(cargo check:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(cargo test)",
+      "Bash(rustc:*)",
+      "Bash(./test_modifier_parsing.exe)",
+      "Bash(cargo run:*)",
+      "Bash(rm:*)"
     ],
     "deny": []
   }
