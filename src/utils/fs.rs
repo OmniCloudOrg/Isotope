@@ -13,26 +13,33 @@ impl FileSystemManager {
 
     pub fn create_working_directory(&self) -> Result<()> {
         info!("Creating working directory: {}", self.working_dir.display());
-        
+
         if self.working_dir.exists() {
             warn!("Working directory already exists, cleaning up first");
             self.cleanup()?;
         }
 
-        std::fs::create_dir_all(&self.working_dir)
-            .with_context(|| format!("Failed to create working directory: {}", self.working_dir.display()))?;
+        std::fs::create_dir_all(&self.working_dir).with_context(|| {
+            format!(
+                "Failed to create working directory: {}",
+                self.working_dir.display()
+            )
+        })?;
 
         Ok(())
     }
 
     pub fn cleanup(&self) -> Result<()> {
         if self.working_dir.exists() {
-            info!("Cleaning up working directory: {}", self.working_dir.display());
-            
+            info!(
+                "Cleaning up working directory: {}",
+                self.working_dir.display()
+            );
+
             // On Windows, files might be locked, so we try multiple times
             let mut attempts = 0;
             let max_attempts = 3;
-            
+
             loop {
                 match std::fs::remove_dir_all(&self.working_dir) {
                     Ok(()) => {
@@ -44,7 +51,8 @@ impl FileSystemManager {
                         if attempts >= max_attempts {
                             return Err(anyhow::anyhow!(
                                 "Failed to cleanup working directory after {} attempts: {}",
-                                max_attempts, e
+                                max_attempts,
+                                e
                             ));
                         }
                         warn!("Cleanup attempt {} failed, retrying: {}", attempts, e);
@@ -70,15 +78,19 @@ impl FileSystemManager {
 
     pub fn copy_file(&self, from: &Path, to: &Path) -> Result<()> {
         debug!("Copying file: {} -> {}", from.display(), to.display());
-        
+
         if !from.exists() {
-            return Err(anyhow::anyhow!("Source file does not exist: {}", from.display()));
+            return Err(anyhow::anyhow!(
+                "Source file does not exist: {}",
+                from.display()
+            ));
         }
 
         // Create parent directory if it doesn't exist
         if let Some(parent) = to.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create parent directory: {}", parent.display()))?;
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create parent directory: {}", parent.display())
+            })?;
         }
 
         std::fs::copy(from, to)
@@ -89,9 +101,12 @@ impl FileSystemManager {
 
     pub fn copy_directory(&self, from: &Path, to: &Path) -> Result<()> {
         info!("Copying directory: {} -> {}", from.display(), to.display());
-        
+
         if !from.exists() {
-            return Err(anyhow::anyhow!("Source directory does not exist: {}", from.display()));
+            return Err(anyhow::anyhow!(
+                "Source directory does not exist: {}",
+                from.display()
+            ));
         }
 
         self.copy_dir_recursive(from, to)
@@ -121,11 +136,12 @@ impl FileSystemManager {
 
     pub fn write_file(&self, path: &Path, content: &[u8]) -> Result<()> {
         debug!("Writing file: {}", path.display());
-        
+
         // Create parent directory if it doesn't exist
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create parent directory: {}", parent.display()))?;
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create parent directory: {}", parent.display())
+            })?;
         }
 
         std::fs::write(path, content)
@@ -136,9 +152,8 @@ impl FileSystemManager {
 
     pub fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
         debug!("Reading file: {}", path.display());
-        
-        std::fs::read(path)
-            .with_context(|| format!("Failed to read file: {}", path.display()))
+
+        std::fs::read(path).with_context(|| format!("Failed to read file: {}", path.display()))
     }
 
     pub fn file_exists(&self, path: &Path) -> bool {
@@ -157,7 +172,7 @@ impl FileSystemManager {
 
     pub fn make_executable(&self, path: &Path) -> Result<()> {
         debug!("Making file executable: {}", path.display());
-        
+
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -173,7 +188,10 @@ impl FileSystemManager {
         {
             // On Windows, .exe and .bat files are inherently executable
             // No additional action needed
-            debug!("File permissions not modified on Windows: {}", path.display());
+            debug!(
+                "File permissions not modified on Windows: {}",
+                path.display()
+            );
         }
 
         Ok(())
@@ -186,17 +204,19 @@ impl FileSystemManager {
     pub fn ensure_directory_empty(&self, path: &Path) -> Result<()> {
         if path.exists() {
             debug!("Clearing directory: {}", path.display());
-            
+
             for entry in std::fs::read_dir(path)? {
                 let entry = entry?;
                 let entry_path = entry.path();
-                
+
                 if entry_path.is_dir() {
-                    std::fs::remove_dir_all(&entry_path)
-                        .with_context(|| format!("Failed to remove directory: {}", entry_path.display()))?;
+                    std::fs::remove_dir_all(&entry_path).with_context(|| {
+                        format!("Failed to remove directory: {}", entry_path.display())
+                    })?;
                 } else {
-                    std::fs::remove_file(&entry_path)
-                        .with_context(|| format!("Failed to remove file: {}", entry_path.display()))?;
+                    std::fs::remove_file(&entry_path).with_context(|| {
+                        format!("Failed to remove file: {}", entry_path.display())
+                    })?;
                 }
             }
         } else {

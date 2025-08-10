@@ -25,7 +25,10 @@ impl std::str::FromStr for VmProvider {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "virtualbox" => Ok(VmProvider::VirtualBox),
-            _ => Err(anyhow::anyhow!("Unsupported VM provider: {}. Only VirtualBox is supported.", s)),
+            _ => Err(anyhow::anyhow!(
+                "Unsupported VM provider: {}. Only VirtualBox is supported.",
+                s
+            )),
         }
     }
 }
