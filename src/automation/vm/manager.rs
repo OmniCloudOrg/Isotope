@@ -128,20 +128,6 @@ impl VmManager {
         info!("Created VM instance: {}", instance.name);
         Ok(instance)
     }
-    /// Restore SSH port from .isometa if present (call this before resuming execution)
-    pub fn restore_ssh_port_from_metadata(
-        &mut self,
-        isotope_path: &Path,
-        instance: &mut VmInstance,
-    ) {
-        if let Ok(meta) = VmMetadata::load_from_current_dir() {
-            if let Some(entry) = meta.get_vm_for_isotope_file(isotope_path) {
-                if let Some(port) = entry.ssh_port {
-                    instance.config.network_config.ssh_port = port;
-                }
-            }
-        }
-    }
 
     pub async fn attach_iso(&mut self, instance: &VmInstance, iso_path: &Path) -> Result<()> {
         info!(

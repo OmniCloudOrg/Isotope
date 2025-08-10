@@ -87,7 +87,6 @@ impl VmMetadata {
             },
             last_used: now,
             provider: format!("{:?}", vm_instance.provider),
-            ssh_port: Some(vm_instance.config.network_config.ssh_port),
         };
         info!(
             "Tracking VM {} for isotope file {}",
