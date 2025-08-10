@@ -1,15 +1,15 @@
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
+use image::DynamicImage;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
 use tracing::{debug, info, trace, warn};
-use image::DynamicImage;
 
+use super::VmProviderTrait;
 use crate::automation::vm::{VmInstance, VmState};
 use crate::utils::net;
-use super::VmProviderTrait;
 
 pub struct VirtualBoxProvider;
 
@@ -30,18 +30,21 @@ impl VirtualBoxProvider {
     }
 
     async fn vm_exists(&self, vm_name: &str) -> Result<bool> {
-        let output = self.vboxmanage_cmd()
+        let output = self
+            .vboxmanage_cmd()
             .args(["list", "vms"])
             .output()
             .context("Failed to list VirtualBox VMs")?;
 
         if !output.status.success() {
-            return Err(anyhow!("Failed to list VMs: {}", 
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "Failed to list VMs: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         let output_str = String::from_utf8_lossy(&output.stdout);
-        Ok(output_str.contains(&format!("\"{}\"", vm_name)))
+        Ok(output_str.contains(&format!("\"{vm_name}\"")))
     }
 }
 
@@ -49,8 +52,14 @@ impl VirtualBoxProvider {
 impl VmProviderTrait for VirtualBoxProvider {
     fn get_ssh_endpoint(&self, instance: &VmInstance) -> (String, u16) {
         // Try to get the VM's real IP using VBoxManage guestproperty
-        let output = self.vboxmanage_cmd()
-            .args(["guestproperty", "get", &instance.name, "/VirtualBox/GuestInfo/Net/0/V4/IP"])
+        let output = self
+            .vboxmanage_cmd()
+            .args([
+                "guestproperty",
+                "get",
+                &instance.name,
+                "/VirtualBox/GuestInfo/Net/0/V4/IP",
+            ])
             .output();
         if let Ok(output) = output {
             if output.status.success() {
@@ -64,32 +73,43 @@ impl VmProviderTrait for VirtualBoxProvider {
             }
         }
         // Fallback to 127.0.0.1 and forwarded port
-        ("127.0.0.1".to_string(), instance.config.network_config.ssh_port)
+        (
+            "127.0.0.1".to_string(),
+            instance.config.network_config.ssh_port,
+        )
     }
     async fn create_vm(&self, instance: &mut VmInstance) -> Result<()> {
         info!("Creating VirtualBox VM: {}", instance.name);
 
         // Check if VM already exists
         if self.vm_exists(&instance.name).await? {
-            info!("VirtualBox VM {} already exists, skipping creation", instance.name);
+            info!(
+                "VirtualBox VM {} already exists, skipping creation",
+                instance.name
+            );
             instance.set_state(VmState::Stopped);
             return Ok(());
         }
 
         // Create VM
-        let output = self.vboxmanage_cmd()
+        let output = self
+            .vboxmanage_cmd()
             .args([
                 "createvm",
-                "--name", &instance.name,
-                "--ostype", "Linux_64", // Default, could be configurable
-                "--register"
+                "--name",
+                &instance.name,
+                "--ostype",
+                "Linux_64", // Default, could be configurable
+                "--register",
             ])
             .output()
             .context("Failed to execute VBoxManage createvm")?;
 
         if !output.status.success() {
-            return Err(anyhow!("Failed to create VirtualBox VM: {}", 
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "Failed to create VirtualBox VM: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         // Configure VM settings
@@ -105,31 +125,41 @@ impl VmProviderTrait for VirtualBoxProvider {
         ];
 
         for (key, value) in &configs {
-            let output = self.vboxmanage_cmd()
+            let output = self
+                .vboxmanage_cmd()
                 .args(["modifyvm", &instance.name, key, value])
                 .output()
                 .context("Failed to configure VM")?;
 
             if !output.status.success() {
-                return Err(anyhow!("Failed to configure VM setting {}: {}", 
-                    key, String::from_utf8_lossy(&output.stderr)));
+                return Err(anyhow!(
+                    "Failed to configure VM setting {}: {}",
+                    key,
+                    String::from_utf8_lossy(&output.stderr)
+                ));
             }
         }
 
-
         // Configure network adapter (NAT with port forwarding for SSH)
-        let output = self.vboxmanage_cmd()
+        let output = self
+            .vboxmanage_cmd()
             .args([
-                "modifyvm", &instance.name,
-                "--nic1", "nat",
-                "--nictype1", "82540EM",
-                "--cableconnected1", "on"
+                "modifyvm",
+                &instance.name,
+                "--nic1",
+                "nat",
+                "--nictype1",
+                "82540EM",
+                "--cableconnected1",
+                "on",
             ])
             .output()
             .context("Failed to configure network adapter")?;
         if !output.status.success() {
-            return Err(anyhow!("Failed to configure network adapter: {}",
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "Failed to configure network adapter: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         // Find a random unoccupied port for SSH forwarding
@@ -139,68 +169,95 @@ impl VmProviderTrait for VirtualBoxProvider {
         instance.config.network_config.ssh_port = ssh_host_port;
 
         // Set up port forwarding for SSH (host port to guest 22)
-        let output = self.vboxmanage_cmd()
+        let output = self
+            .vboxmanage_cmd()
             .args([
-                "modifyvm", &instance.name,
-                "--natpf1", &format!("ssh,tcp,,{},,22", ssh_host_port)
+                "modifyvm",
+                &instance.name,
+                "--natpf1",
+                &format!("ssh,tcp,,{ssh_host_port},,22"),
             ])
             .output()
             .context("Failed to set up port forwarding for SSH")?;
         if !output.status.success() {
-            return Err(anyhow!("Failed to set up port forwarding: {}",
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "Failed to set up port forwarding: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         // Create and attach disk
         let disk_path = format!("{}.vdi", instance.name);
-        
-        let output = self.vboxmanage_cmd()
+
+        let output = self
+            .vboxmanage_cmd()
             .args([
                 "createmedium",
                 "disk",
-                "--filename", &disk_path,
-                "--size", &(instance.config.disk_size_gb * 1024).to_string(), // Convert to MB
-                "--format", "VDI"
+                "--filename",
+                &disk_path,
+                "--size",
+                &(instance.config.disk_size_gb * 1024).to_string(), // Convert to MB
+                "--format",
+                "VDI",
             ])
             .output()
             .context("Failed to create VM disk")?;
 
         if !output.status.success() {
-            return Err(anyhow!("Failed to create VirtualBox disk: {}", 
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "Failed to create VirtualBox disk: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         // Attach disk to VM
-        let output = self.vboxmanage_cmd()
+        let output = self
+            .vboxmanage_cmd()
             .args([
-                "storagectl", &instance.name,
-                "--name", "SATA Controller",
-                "--add", "sata",
-                "--controller", "IntelAHCI"
+                "storagectl",
+                &instance.name,
+                "--name",
+                "SATA Controller",
+                "--add",
+                "sata",
+                "--controller",
+                "IntelAHCI",
             ])
             .output()
             .context("Failed to add SATA controller")?;
 
         if !output.status.success() {
-            return Err(anyhow!("Failed to add SATA controller: {}", 
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "Failed to add SATA controller: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
-        let output = self.vboxmanage_cmd()
+        let output = self
+            .vboxmanage_cmd()
             .args([
-                "storageattach", &instance.name,
-                "--storagectl", "SATA Controller",
-                "--port", "0",
-                "--device", "0",
-                "--type", "hdd",
-                "--medium", &disk_path
+                "storageattach",
+                &instance.name,
+                "--storagectl",
+                "SATA Controller",
+                "--port",
+                "0",
+                "--device",
+                "0",
+                "--type",
+                "hdd",
+                "--medium",
+                &disk_path,
             ])
             .output()
             .context("Failed to attach disk")?;
 
         if !output.status.success() {
-            return Err(anyhow!("Failed to attach disk: {}", 
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "Failed to attach disk: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         instance.set_state(VmState::Stopped);
@@ -221,7 +278,8 @@ impl VmProviderTrait for VirtualBoxProvider {
 
         instance.set_state(VmState::Starting);
 
-        let output = self.vboxmanage_cmd()
+        let output = self
+            .vboxmanage_cmd()
             .args(["startvm", &instance.name, "--type", "headless"])
             .output()
             .context("Failed to start VirtualBox VM")?;
@@ -255,28 +313,35 @@ impl VmProviderTrait for VirtualBoxProvider {
         instance.set_state(VmState::Stopping);
 
         // Try graceful shutdown first
-        let output = self.vboxmanage_cmd()
+        let output = self
+            .vboxmanage_cmd()
             .args(["controlvm", &instance.name, "acpipowerbutton"])
             .output()
             .context("Failed to send ACPI power button")?;
 
         if output.status.success() {
             // Wait for graceful shutdown
-            if timeout(Duration::from_secs(30), self.wait_for_shutdown(instance)).await.is_ok() {
+            if timeout(Duration::from_secs(30), self.wait_for_shutdown(instance))
+                .await
+                .is_ok()
+            {
                 instance.set_state(VmState::Stopped);
                 return Ok(());
             }
         }
 
         // Force power off
-        let output = self.vboxmanage_cmd()
+        let output = self
+            .vboxmanage_cmd()
             .args(["controlvm", &instance.name, "poweroff"])
             .output()
             .context("Failed to power off VM")?;
 
         if !output.status.success() {
-            return Err(anyhow!("Failed to power off VM: {}", 
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "Failed to power off VM: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         instance.set_state(VmState::Stopped);
@@ -292,14 +357,17 @@ impl VmProviderTrait for VirtualBoxProvider {
         }
 
         // Unregister and delete VM
-        let output = self.vboxmanage_cmd()
+        let output = self
+            .vboxmanage_cmd()
             .args(["unregistervm", &instance.name, "--delete"])
             .output()
             .context("Failed to delete VirtualBox VM")?;
 
         if !output.status.success() {
-            return Err(anyhow!("Failed to delete VM: {}", 
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "Failed to delete VM: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         Ok(())
@@ -318,30 +386,43 @@ impl VmProviderTrait for VirtualBoxProvider {
         }
 
         // Create IDE controller if it doesn't exist
-        let _ = self.vboxmanage_cmd()
+        let _ = self
+            .vboxmanage_cmd()
             .args([
-                "storagectl", &instance.name,
-                "--name", "IDE Controller",
-                "--add", "ide"
+                "storagectl",
+                &instance.name,
+                "--name",
+                "IDE Controller",
+                "--add",
+                "ide",
             ])
             .output();
 
         // Attach ISO
-        let output = self.vboxmanage_cmd()
+        let output = self
+            .vboxmanage_cmd()
             .args([
-                "storageattach", &instance.name,
-                "--storagectl", "IDE Controller",
-                "--port", "1",
-                "--device", "0",
-                "--type", "dvddrive",
-                "--medium", iso_path.to_str().unwrap()
+                "storageattach",
+                &instance.name,
+                "--storagectl",
+                "IDE Controller",
+                "--port",
+                "1",
+                "--device",
+                "0",
+                "--type",
+                "dvddrive",
+                "--medium",
+                iso_path.to_str().unwrap(),
             ])
             .output()
             .context("Failed to attach ISO")?;
 
         if !output.status.success() {
-            return Err(anyhow!("Failed to attach ISO: {}", 
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "Failed to attach ISO: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         instance.set_iso_path(iso_path.to_path_buf());
@@ -351,20 +432,28 @@ impl VmProviderTrait for VirtualBoxProvider {
     async fn detach_iso(&self, instance: &mut VmInstance) -> Result<()> {
         info!("Detaching ISO from VirtualBox VM");
 
-        let output = self.vboxmanage_cmd()
+        let output = self
+            .vboxmanage_cmd()
             .args([
-                "storageattach", &instance.name,
-                "--storagectl", "IDE Controller",
-                "--port", "1",
-                "--device", "0",
-                "--medium", "none"
+                "storageattach",
+                &instance.name,
+                "--storagectl",
+                "IDE Controller",
+                "--port",
+                "1",
+                "--device",
+                "0",
+                "--medium",
+                "none",
             ])
             .output()
             .context("Failed to detach ISO")?;
 
         if !output.status.success() {
-            return Err(anyhow!("Failed to detach ISO: {}", 
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "Failed to detach ISO: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         instance.iso_path = None;
@@ -374,18 +463,24 @@ impl VmProviderTrait for VirtualBoxProvider {
     async fn create_snapshot(&self, instance: &VmInstance, snapshot_name: &str) -> Result<()> {
         info!("Creating VirtualBox snapshot: {}", snapshot_name);
 
-        let output = self.vboxmanage_cmd()
+        let output = self
+            .vboxmanage_cmd()
             .args([
-                "snapshot", &instance.name,
-                "take", snapshot_name,
-                "--description", &format!("Isotope snapshot: {}", snapshot_name)
+                "snapshot",
+                &instance.name,
+                "take",
+                snapshot_name,
+                "--description",
+                &format!("Isotope snapshot: {snapshot_name}"),
             ])
             .output()
             .context("Failed to create snapshot")?;
 
         if !output.status.success() {
-            return Err(anyhow!("Failed to create snapshot: {}", 
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "Failed to create snapshot: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         Ok(())
@@ -399,24 +494,25 @@ impl VmProviderTrait for VirtualBoxProvider {
             self.stop_vm(instance).await?;
         }
 
-        let output = self.vboxmanage_cmd()
-            .args([
-                "snapshot", &instance.name,
-                "restore", snapshot_name
-            ])
+        let output = self
+            .vboxmanage_cmd()
+            .args(["snapshot", &instance.name, "restore", snapshot_name])
             .output()
             .context("Failed to restore snapshot")?;
 
         if !output.status.success() {
-            return Err(anyhow!("Failed to restore snapshot: {}", 
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "Failed to restore snapshot: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         Ok(())
     }
 
     async fn is_running(&self, instance: &VmInstance) -> Result<bool> {
-        let output = self.vboxmanage_cmd()
+        let output = self
+            .vboxmanage_cmd()
             .args(["showvminfo", &instance.name, "--machinereadable"])
             .output()
             .context("Failed to get VM info")?;
@@ -441,7 +537,8 @@ impl VmProviderTrait for VirtualBoxProvider {
                 sleep(check_interval).await;
             }
             Ok::<(), anyhow::Error>(())
-        }).await
+        })
+        .await
         .context("Timeout waiting for VM shutdown")?
     }
 
@@ -451,19 +548,20 @@ impl VmProviderTrait for VirtualBoxProvider {
         for key in keys {
             // Convert key to VirtualBox scancode format
             let scancodes = self.key_to_scancodes(key)?;
-            
-            let output = self.vboxmanage_cmd()
-                .args([
-                    "controlvm", &instance.name,
-                    "keyboardputscancode"
-                ])
+
+            let output = self
+                .vboxmanage_cmd()
+                .args(["controlvm", &instance.name, "keyboardputscancode"])
                 .args(scancodes.iter().map(|s| s.as_str()))
                 .output()
                 .context("Failed to send keyboard input")?;
 
             if !output.status.success() {
-                return Err(anyhow!("Failed to send key '{}': {}", 
-                    key, String::from_utf8_lossy(&output.stderr)));
+                return Err(anyhow!(
+                    "Failed to send key '{}': {}",
+                    key,
+                    String::from_utf8_lossy(&output.stderr)
+                ));
             }
 
             sleep(Duration::from_millis(50)).await;
@@ -478,64 +576,85 @@ impl VmProviderTrait for VirtualBoxProvider {
 
         let screenshot_path = format!("{}-screenshot.png", instance.name);
         trace!("Screenshot will be saved to: {}", screenshot_path);
-        
-        let output = self.vboxmanage_cmd()
+
+        let output = self
+            .vboxmanage_cmd()
             .args([
-                "controlvm", &instance.name,
-                "screenshotpng", &screenshot_path
+                "controlvm",
+                &instance.name,
+                "screenshotpng",
+                &screenshot_path,
             ])
             .output()
             .context("Failed to capture screenshot")?;
-        
+
         trace!("VBoxManage screenshotpng exit code: {}", output.status);
         if !output.stdout.is_empty() {
-            trace!("VBoxManage stdout: {}", String::from_utf8_lossy(&output.stdout));
+            trace!(
+                "VBoxManage stdout: {}",
+                String::from_utf8_lossy(&output.stdout)
+            );
         }
         if !output.stderr.is_empty() {
-            trace!("VBoxManage stderr: {}", String::from_utf8_lossy(&output.stderr));
+            trace!(
+                "VBoxManage stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
-        
+
         if !output.status.success() {
-            return Err(anyhow!("Failed to capture screenshot: {}", 
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "Failed to capture screenshot: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
-        
+
         // Wait a moment for the file to be written
         sleep(Duration::from_millis(300)).await;
-        
+
         // Check if file exists and get its size
         if let Ok(metadata) = std::fs::metadata(&screenshot_path) {
-            trace!("Screenshot file created successfully. Size: {} bytes", metadata.len());
+            trace!(
+                "Screenshot file created successfully. Size: {} bytes",
+                metadata.len()
+            );
             if metadata.len() == 0 {
                 warn!("Screenshot file is empty (0 bytes)");
             }
         } else {
             warn!("Screenshot file was not created: {}", screenshot_path);
         }
-        
+
         trace!("Loading screenshot image...");
-        let image = image::open(&screenshot_path)
-            .context("Failed to load screenshot image")?;
-        
-        trace!("Screenshot loaded: {}x{} pixels, format: {:?}", 
-              image.width(), image.height(), image.color());
-        
+        let image = image::open(&screenshot_path).context("Failed to load screenshot image")?;
+
+        trace!(
+            "Screenshot loaded: {}x{} pixels, format: {:?}",
+            image.width(),
+            image.height(),
+            image.color()
+        );
+
         // Clean up the temporary file
         let _ = std::fs::remove_file(&screenshot_path);
         trace!("=== VBOX SCREEN CAPTURE END ===");
-        
+
         Ok(image)
     }
 
     async fn get_console_output(&self, instance: &VmInstance) -> Result<String> {
-        trace!("Getting console output from VirtualBox VM: {}", instance.name);
-        
+        trace!(
+            "Getting console output from VirtualBox VM: {}",
+            instance.name
+        );
+
         // Check if VM has serial port configured for console output
         let serial_file_path = format!("{}-console.log", instance.name);
-        
+
         // First, ensure serial port is configured for this VM
-        self.configure_console_output(instance, &serial_file_path).await?;
-        
+        self.configure_console_output(instance, &serial_file_path)
+            .await?;
+
         // Read the console output from the serial file
         match std::fs::read_to_string(&serial_file_path) {
             Ok(content) => Ok(content),
@@ -552,72 +671,84 @@ impl VmProviderTrait for VirtualBoxProvider {
 }
 
 impl VirtualBoxProvider {
-    async fn configure_console_output(&self, instance: &VmInstance, output_file: &str) -> Result<()> {
+    async fn configure_console_output(
+        &self,
+        instance: &VmInstance,
+        output_file: &str,
+    ) -> Result<()> {
         // Check if VM is running - can't modify VM config while running
         if self.is_running(instance).await? {
-            trace!("VM {} is running, skipping serial port configuration", instance.name);
+            trace!(
+                "VM {} is running, skipping serial port configuration",
+                instance.name
+            );
             return Ok(());
         }
-        
+
         // Configure serial port 1 to output to file
         let configs = [
             ("--uart1", "0x3F8", "4"),
             ("--uartmode1", "file", output_file),
         ];
-        
+
         for (key, value1, value2) in &configs {
             let mut cmd = self.vboxmanage_cmd();
             cmd.args(["modifyvm", &instance.name, key]);
-            
+
             if key == &"--uart1" {
                 cmd.args([value1, value2]);
             } else {
-                cmd.args([&format!("{} {}", value1, value2)]);
+                cmd.args([&format!("{value1} {value2}")]);
             }
-            
-            let output = cmd.output()
-                .context("Failed to configure serial port")?;
-            
+
+            let output = cmd.output().context("Failed to configure serial port")?;
+
             if !output.status.success() {
-                warn!("Failed to configure serial port: {}", 
-                      String::from_utf8_lossy(&output.stderr));
+                warn!(
+                    "Failed to configure serial port: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
             }
         }
-        
+
         Ok(())
     }
-    
+
     async fn get_vm_console_info(&self, instance: &VmInstance) -> Result<String> {
         // Get VM runtime information
-        let output = self.vboxmanage_cmd()
+        let output = self
+            .vboxmanage_cmd()
             .args(["showvminfo", &instance.name, "--machinereadable"])
             .output()
             .context("Failed to get VM info")?;
-        
+
         if !output.status.success() {
-            return Err(anyhow!("Failed to get VM console info: {}", 
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "Failed to get VM console info: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
-        
+
         let output_str = String::from_utf8_lossy(&output.stdout);
-        
+
         // Extract relevant console/boot information
         let mut console_lines = Vec::new();
-        
+
         for line in output_str.lines() {
-            if line.contains("VMState") || 
-               line.contains("bootmenu") || 
-               line.contains("boot") ||
-               line.contains("uart") ||
-               line.contains("serial") {
+            if line.contains("VMState")
+                || line.contains("bootmenu")
+                || line.contains("boot")
+                || line.contains("uart")
+                || line.contains("serial")
+            {
                 console_lines.push(line);
             }
         }
-        
+
         if console_lines.is_empty() {
             return Ok("No console output available".to_string());
         }
-        
+
         Ok(console_lines.join("\n"))
     }
 }
@@ -628,7 +759,7 @@ impl VirtualBoxProvider {
         if key.contains('+') {
             return self.handle_key_combination(key);
         }
-        
+
         let scancodes = match key.to_lowercase().as_str() {
             "enter" | "return" => vec!["1c", "9c"],
             "tab" => vec!["0f", "8f"],
@@ -689,44 +820,44 @@ impl VirtualBoxProvider {
             "8" => vec!["09", "89"],
             "9" => vec!["0a", "8a"],
             // Special characters
-            "-" => vec!["0c", "8c"],    // Hyphen/minus
-            "=" => vec!["0d", "8d"],    // Equals
-            "[" => vec!["1a", "9a"],    // Left bracket
-            "]" => vec!["1b", "9b"],    // Right bracket
-            "\\" => vec!["2b", "ab"],   // Backslash
-            ";" => vec!["27", "a7"],    // Semicolon
-            "'" => vec!["28", "a8"],    // Apostrophe/single quote
-            "`" => vec!["29", "a9"],    // Grave accent/backtick
-            "," => vec!["33", "b3"],    // Comma
-            "." => vec!["34", "b4"],    // Period/dot
-            "/" => vec!["35", "b5"],    // Forward slash
+            "-" => vec!["0c", "8c"],  // Hyphen/minus
+            "=" => vec!["0d", "8d"],  // Equals
+            "[" => vec!["1a", "9a"],  // Left bracket
+            "]" => vec!["1b", "9b"],  // Right bracket
+            "\\" => vec!["2b", "ab"], // Backslash
+            ";" => vec!["27", "a7"],  // Semicolon
+            "'" => vec!["28", "a8"],  // Apostrophe/single quote
+            "`" => vec!["29", "a9"],  // Grave accent/backtick
+            "," => vec!["33", "b3"],  // Comma
+            "." => vec!["34", "b4"],  // Period/dot
+            "/" => vec!["35", "b5"],  // Forward slash
             // Shifted characters (using shift scancode 2a for press, aa for release)
-            "!" => vec!["2a", "02", "82", "aa"],    // Shift+1
-            "@" => vec!["2a", "03", "83", "aa"],    // Shift+2
-            "#" => vec!["2a", "04", "84", "aa"],    // Shift+3
-            "$" => vec!["2a", "05", "85", "aa"],    // Shift+4
-            "%" => vec!["2a", "06", "86", "aa"],    // Shift+5
-            "^" => vec!["2a", "07", "87", "aa"],    // Shift+6
-            "&" => vec!["2a", "08", "88", "aa"],    // Shift+7
-            "*" => vec!["2a", "09", "89", "aa"],    // Shift+8
-            "(" => vec!["2a", "0a", "8a", "aa"],    // Shift+9
-            ")" => vec!["2a", "0b", "8b", "aa"],    // Shift+0
-            "_" => vec!["2a", "0c", "8c", "aa"],    // Shift+-
-            "+" => vec!["2a", "0d", "8d", "aa"],    // Shift+=
-            "{" => vec!["2a", "1a", "9a", "aa"],    // Shift+[
-            "}" => vec!["2a", "1b", "9b", "aa"],    // Shift+]
-            "|" => vec!["2a", "2b", "ab", "aa"],    // Shift+\
-            ":" => vec!["2a", "27", "a7", "aa"],    // Shift+;
-            "\"" => vec!["2a", "28", "a8", "aa"],   // Shift+'
-            "~" => vec!["2a", "29", "a9", "aa"],    // Shift+`
-            "<" => vec!["2a", "33", "b3", "aa"],    // Shift+,
-            ">" => vec!["2a", "34", "b4", "aa"],    // Shift+.
-            "?" => vec!["2a", "35", "b5", "aa"],    // Shift+/
+            "!" => vec!["2a", "02", "82", "aa"],  // Shift+1
+            "@" => vec!["2a", "03", "83", "aa"],  // Shift+2
+            "#" => vec!["2a", "04", "84", "aa"],  // Shift+3
+            "$" => vec!["2a", "05", "85", "aa"],  // Shift+4
+            "%" => vec!["2a", "06", "86", "aa"],  // Shift+5
+            "^" => vec!["2a", "07", "87", "aa"],  // Shift+6
+            "&" => vec!["2a", "08", "88", "aa"],  // Shift+7
+            "*" => vec!["2a", "09", "89", "aa"],  // Shift+8
+            "(" => vec!["2a", "0a", "8a", "aa"],  // Shift+9
+            ")" => vec!["2a", "0b", "8b", "aa"],  // Shift+0
+            "_" => vec!["2a", "0c", "8c", "aa"],  // Shift+-
+            "+" => vec!["2a", "0d", "8d", "aa"],  // Shift+=
+            "{" => vec!["2a", "1a", "9a", "aa"],  // Shift+[
+            "}" => vec!["2a", "1b", "9b", "aa"],  // Shift+]
+            "|" => vec!["2a", "2b", "ab", "aa"],  // Shift+\
+            ":" => vec!["2a", "27", "a7", "aa"],  // Shift+;
+            "\"" => vec!["2a", "28", "a8", "aa"], // Shift+'
+            "~" => vec!["2a", "29", "a9", "aa"],  // Shift+`
+            "<" => vec!["2a", "33", "b3", "aa"],  // Shift+,
+            ">" => vec!["2a", "34", "b4", "aa"],  // Shift+.
+            "?" => vec!["2a", "35", "b5", "aa"],  // Shift+/
             // Uppercase letters (using shift)
-            "A" => vec!["2a", "1e", "9e", "aa"],
-            "B" => vec!["2a", "30", "b0", "aa"],
-            "C" => vec!["2a", "2e", "ae", "aa"],
-            "D" => vec!["2a", "20", "a0", "aa"],
+            "a" => vec!["2a", "1e", "9e", "aa"],
+            "b" => vec!["2a", "30", "b0", "aa"],
+            "c" => vec!["2a", "2e", "ae", "aa"],
+            "d" => vec!["2a", "20", "a0", "aa"],
             "E" => vec!["2a", "12", "92", "aa"],
             "F" => vec!["2a", "21", "a1", "aa"],
             "G" => vec!["2a", "22", "a2", "aa"],
@@ -782,7 +913,7 @@ impl VirtualBoxProvider {
         // Add modifier release
         let modifier_release = match modifier.as_str() {
             "ctrl" | "control" => "9d",
-            "shift" => "aa", 
+            "shift" => "aa",
             "alt" => "b8",
             _ => return Err(anyhow!("Unknown modifier: {}", modifier)),
         };

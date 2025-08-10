@@ -16,9 +16,17 @@ impl IsoPackager {
         }
     }
 
-    pub fn create_live_iso(&self, snapshot_path: &Path, output_path: &Path, pack_stage: &Stage) -> Result<()> {
-        info!("Creating live ISO from snapshot: {}", snapshot_path.display());
-        
+    pub fn create_live_iso(
+        &self,
+        snapshot_path: &Path,
+        output_path: &Path,
+        pack_stage: &Stage,
+    ) -> Result<()> {
+        info!(
+            "Creating live ISO from snapshot: {}",
+            snapshot_path.display()
+        );
+
         // Create temporary working directory
         std::fs::create_dir_all(&self.temp_dir)
             .context("Failed to create ISO working directory")?;
@@ -44,14 +52,16 @@ impl IsoPackager {
     fn extract_vm_filesystem(&self, snapshot_path: &Path, output_path: &Path) -> Result<()> {
         info!("Extracting VM filesystem from: {}", snapshot_path.display());
 
-        std::fs::create_dir_all(output_path)
-            .context("Failed to create extraction directory")?;
+        std::fs::create_dir_all(output_path).context("Failed to create extraction directory")?;
 
         // Mount the VM disk image and extract its contents
         if snapshot_path.extension().and_then(|s| s.to_str()) == Some("qcow2") {
             self.extract_qcow2_filesystem(snapshot_path, output_path)?;
         } else {
-            return Err(anyhow!("Unsupported disk format: {}", snapshot_path.display()));
+            return Err(anyhow!(
+                "Unsupported disk format: {}",
+                snapshot_path.display()
+            ));
         }
 
         Ok(())
@@ -65,17 +75,21 @@ impl IsoPackager {
         let output = Command::new("qemu-img")
             .args([
                 "convert",
-                "-f", "qcow2",
-                "-O", "raw", 
+                "-f",
+                "qcow2",
+                "-O",
+                "raw",
                 qcow2_path.to_str().unwrap(),
-                raw_path.to_str().unwrap()
+                raw_path.to_str().unwrap(),
             ])
             .output()
             .context("Failed to convert QCOW2 to raw")?;
 
         if !output.status.success() {
-            return Err(anyhow!("QEMU convert failed: {}", 
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "QEMU convert failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         // Mount the raw disk image
@@ -83,7 +97,7 @@ impl IsoPackager {
         {
             self.mount_raw_disk_unix(&raw_path, output_path)?;
         }
-        
+
         #[cfg(windows)]
         {
             self.mount_raw_disk_windows(&raw_path, output_path)?;
@@ -94,8 +108,6 @@ impl IsoPackager {
 
     #[cfg(unix)]
     fn mount_raw_disk_unix(&self, raw_path: &Path, output_path: &Path) -> Result<()> {
-        use std::os::unix::fs::PermissionsExt;
-
         info!("Mounting raw disk image (Unix)");
 
         // Find the main partition (usually the largest)
@@ -114,9 +126,11 @@ impl IsoPackager {
         // Create loop device
         let loop_output = Command::new("losetup")
             .args([
-                "-f", "--show", 
-                "-o", &offset.to_string(),
-                raw_path.to_str().unwrap()
+                "-f",
+                "--show",
+                "-o",
+                &offset.to_string(),
+                raw_path.to_str().unwrap(),
             ])
             .output()
             .context("Failed to create loop device")?;
@@ -125,24 +139,25 @@ impl IsoPackager {
             return Err(anyhow!("Failed to create loop device"));
         }
 
-        let loop_device = String::from_utf8_lossy(&loop_output.stdout).trim().to_string();
+        let loop_device = String::from_utf8_lossy(&loop_output.stdout)
+            .trim()
+            .to_string();
         info!("Created loop device: {}", loop_device);
 
         // Mount the filesystem
         let mount_output = Command::new("mount")
             .args([
-                "-o", "ro", // Read-only
+                "-o",
+                "ro", // Read-only
                 &loop_device,
-                output_path.to_str().unwrap()
+                output_path.to_str().unwrap(),
             ])
             .output()
             .context("Failed to mount filesystem")?;
 
         if !mount_output.status.success() {
             // Cleanup loop device
-            let _ = Command::new("losetup")
-                .args(["-d", &loop_device])
-                .output();
+            let _ = Command::new("losetup").args(["-d", &loop_device]).output();
             return Err(anyhow!("Failed to mount filesystem"));
         }
 
@@ -156,12 +171,14 @@ impl IsoPackager {
             .args([
                 "-a", // Archive mode (preserve attributes)
                 &format!("{}/*", output_path.display()),
-                copy_path.to_str().unwrap()
+                copy_path.to_str().unwrap(),
             ])
             .output();
 
         // Cleanup mount and loop device
-        let _ = Command::new("umount").args([output_path.to_str().unwrap()]).output();
+        let _ = Command::new("umount")
+            .args([output_path.to_str().unwrap()])
+            .output();
         let _ = Command::new("losetup").args(["-d", &loop_device]).output();
 
         // Move copied files to final location
@@ -176,21 +193,25 @@ impl IsoPackager {
     #[cfg(windows)]
     fn mount_raw_disk_windows(&self, raw_path: &Path, output_path: &Path) -> Result<()> {
         info!("Extracting disk image (Windows)");
-        
+
         // On Windows, we would need to use different tools or libraries
         // For now, this is a placeholder that would use tools like:
-        // - 7zip to extract filesystem 
+        // - 7zip to extract filesystem
         // - OSFMount or similar to mount disk images
         // - PowerShell with Hyper-V cmdlets
-        
-        debug!("Would extract {} to {}", raw_path.display(), output_path.display());
-        
+
+        debug!(
+            "Would extract {} to {}",
+            raw_path.display(),
+            output_path.display()
+        );
+
         // Create placeholder directory structure for testing
         std::fs::create_dir_all(output_path.join("boot"))?;
         std::fs::create_dir_all(output_path.join("etc"))?;
         std::fs::create_dir_all(output_path.join("usr"))?;
         std::fs::create_dir_all(output_path.join("var"))?;
-        
+
         Ok(())
     }
 
@@ -201,7 +222,7 @@ impl IsoPackager {
 
         // Copy the extracted filesystem to ISO structure
         // This involves creating the live filesystem structure that can boot
-        
+
         // Create basic live ISO structure
         std::fs::create_dir_all(iso_fs.join("casper"))?; // Ubuntu live
         std::fs::create_dir_all(iso_fs.join("isolinux"))?; // Boot loader
@@ -214,8 +235,10 @@ impl IsoPackager {
         self.create_squashfs(source_fs, &iso_fs.join("casper/filesystem.squashfs"))?;
 
         // Create filesystem size file
-        self.create_filesystem_size(&iso_fs.join("casper/filesystem.squashfs"), 
-                                  &iso_fs.join("casper/filesystem.size"))?;
+        self.create_filesystem_size(
+            &iso_fs.join("casper/filesystem.squashfs"),
+            &iso_fs.join("casper/filesystem.size"),
+        )?;
 
         Ok(())
     }
@@ -230,7 +253,7 @@ impl IsoPackager {
                 for entry in entries.flatten() {
                     let name = entry.file_name();
                     let name_str = name.to_string_lossy();
-                    
+
                     if name_str.starts_with("vmlinuz") {
                         std::fs::copy(entry.path(), iso_fs.join("casper/vmlinuz"))?;
                         info!("Copied kernel: {}", name_str);
@@ -252,15 +275,19 @@ impl IsoPackager {
             .args([
                 source_fs.to_str().unwrap(),
                 output_file.to_str().unwrap(),
-                "-comp", "xz",
-                "-e", "boot" // Exclude boot directory from squashfs
+                "-comp",
+                "xz",
+                "-e",
+                "boot", // Exclude boot directory from squashfs
             ])
             .output()
             .context("Failed to create squashfs")?;
 
         if !output.status.success() {
-            return Err(anyhow!("mksquashfs failed: {}", 
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "mksquashfs failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         info!("Created squashfs: {}", output_file.display());
@@ -268,9 +295,9 @@ impl IsoPackager {
     }
 
     fn create_filesystem_size(&self, squashfs_path: &Path, size_file: &Path) -> Result<()> {
-        let metadata = std::fs::metadata(squashfs_path)
-            .context("Failed to get squashfs metadata")?;
-        
+        let metadata =
+            std::fs::metadata(squashfs_path).context("Failed to get squashfs metadata")?;
+
         std::fs::write(size_file, metadata.len().to_string())
             .context("Failed to write filesystem.size")?;
 
@@ -340,10 +367,10 @@ LABEL live
             if source_dir.exists() {
                 // Check if all required files exist in this source
                 let all_exist = required_files.iter().all(|(_, rel_path)| {
-                    source_dir.join(rel_path).exists() || 
-                    source_dir.join(rel_path.replace("isolinux/", "")).exists()
+                    source_dir.join(rel_path).exists()
+                        || source_dir.join(rel_path.replace("isolinux/", "")).exists()
                 });
-                
+
                 if all_exist {
                     found_source = Some(source_dir);
                     break;
@@ -353,7 +380,7 @@ LABEL live
 
         if let Some(source_dir) = found_source {
             info!("Found syslinux files in: {}", source_dir.display());
-            
+
             // Copy the required files
             for (filename, rel_path) in &required_files {
                 let source_file = if source_dir.join(rel_path).exists() {
@@ -361,31 +388,31 @@ LABEL live
                 } else {
                     source_dir.join(filename)
                 };
-                
+
                 let dest_file = isolinux_dir.join(filename);
-                std::fs::copy(&source_file, &dest_file)
-                    .with_context(|| format!("Failed to copy {} from {}", filename, source_file.display()))?;
-                
+                std::fs::copy(&source_file, &dest_file).with_context(|| {
+                    format!("Failed to copy {} from {}", filename, source_file.display())
+                })?;
+
                 debug!("Copied {}", filename);
             }
-            
+
             // boot.cat is generated by mkisofs/genisoimage, create empty placeholder
             std::fs::write(isolinux_dir.join("boot.cat"), b"")?;
-            
         } else {
             // Fallback: create minimal bootloader files
             warn!("Syslinux files not found, creating minimal bootable structure");
-            
+
             // Create a minimal MBR boot record (simplified)
             let minimal_isolinux_bin = vec![0u8; 2048]; // 2KB minimal boot sector
             std::fs::write(isolinux_dir.join("isolinux.bin"), minimal_isolinux_bin)?;
-            
+
             // Create empty ldlinux.c32 (required for newer isolinux)
             std::fs::write(isolinux_dir.join("ldlinux.c32"), b"")?;
-            
+
             // boot.cat will be created by mkisofs
             std::fs::write(isolinux_dir.join("boot.cat"), b"")?;
-            
+
             info!("Created minimal isolinux files (may not be fully functional)");
         }
 
@@ -410,38 +437,47 @@ LABEL live
                 if isolinux_bin.exists() {
                     // Copy isolinux.bin
                     std::fs::copy(&isolinux_bin, isolinux_dir.join("isolinux.bin"))?;
-                    
+
                     // Copy ldlinux.c32 if it exists
                     let ldlinux = source_isolinux.join("ldlinux.c32");
                     if ldlinux.exists() {
                         std::fs::copy(&ldlinux, isolinux_dir.join("ldlinux.c32"))?;
                     }
-                    
+
                     // Copy any other isolinux files
                     if let Ok(entries) = std::fs::read_dir(&source_isolinux) {
                         for entry in entries.flatten() {
                             let name = entry.file_name();
                             let name_str = name.to_string_lossy();
-                            
+
                             if name_str.ends_with(".c32") || name_str.starts_with("isolinux") {
                                 let dest = isolinux_dir.join(&name);
-                                if !dest.exists() { // Don't overwrite what we've already copied
+                                if !dest.exists() {
+                                    // Don't overwrite what we've already copied
                                     let _ = std::fs::copy(entry.path(), dest);
                                 }
                             }
                         }
                     }
-                    
-                    info!("Copied isolinux files from source ISO at: {}", source_isolinux.display());
+
+                    info!(
+                        "Copied isolinux files from source ISO at: {}",
+                        source_isolinux.display()
+                    );
                     return Ok(());
                 }
             }
         }
-        
+
         Err(anyhow!("No source isolinux files found"))
     }
 
-    fn package_final_iso(&self, iso_fs: &Path, output_path: &Path, pack_stage: &Stage) -> Result<()> {
+    fn package_final_iso(
+        &self,
+        iso_fs: &Path,
+        output_path: &Path,
+        pack_stage: &Stage,
+    ) -> Result<()> {
         info!("Packaging final ISO");
 
         let mut format = "iso9660".to_string();
@@ -466,15 +502,15 @@ LABEL live
 
         // Create parent directory if it doesn't exist
         if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent)
-                .context("Failed to create output directory")?;
+            std::fs::create_dir_all(parent).context("Failed to create output directory")?;
         }
 
         // Use mkisofs/genisoimage to create the final ISO
         let mut cmd = Command::new("mkisofs");
         cmd.args([
             "-r", // Rock Ridge extensions
-            "-V", &volume_label,
+            "-V",
+            &volume_label,
             "-cache-inodes",
             "-J", // Joliet extensions
             "-l", // Allow full 31 character filenames
@@ -482,25 +518,30 @@ LABEL live
 
         if bootable {
             cmd.args([
-                "-b", "isolinux/isolinux.bin",
-                "-c", "isolinux/boot.cat",
+                "-b",
+                "isolinux/isolinux.bin",
+                "-c",
+                "isolinux/boot.cat",
                 "-no-emul-boot",
-                "-boot-load-size", "4",
+                "-boot-load-size",
+                "4",
                 "-boot-info-table",
             ]);
         }
 
         cmd.args([
-            "-o", output_path.to_str().unwrap(),
-            iso_fs.to_str().unwrap()
+            "-o",
+            output_path.to_str().unwrap(),
+            iso_fs.to_str().unwrap(),
         ]);
 
-        let output = cmd.output()
-            .context("Failed to run mkisofs")?;
+        let output = cmd.output().context("Failed to run mkisofs")?;
 
         if !output.status.success() {
-            return Err(anyhow!("mkisofs failed: {}", 
-                String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow!(
+                "mkisofs failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         info!("Final ISO created: {}", output_path.display());

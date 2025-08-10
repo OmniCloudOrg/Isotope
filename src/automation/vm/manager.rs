@@ -5,9 +5,9 @@ use std::time::Duration;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::config::{Instruction, Stage};
-use super::{VmInstance, VmProvider, VmConfig, VmState, NetworkConfig};
 use super::providers::{create_provider, VmProviderTrait};
+use super::{NetworkConfig, VmConfig, VmInstance, VmProvider};
+use crate::config::{Instruction, Stage};
 
 pub struct VmManager {
     instances: HashMap<String, VmInstance>,
@@ -30,7 +30,7 @@ impl VmManager {
 
     pub fn configure_from_stage(&mut self, stage: &Stage) -> Result<()> {
         info!("Configuring VM from init stage");
-        
+
         let mut provider = VmProvider::Qemu; // Default
         let mut memory_mb = 2048;
         let mut cpus = 2;
@@ -55,8 +55,9 @@ impl VmManager {
                         memory_mb = self.parse_memory_size(value)?;
                     }
                     "cpus" => {
-                        cpus = value.parse()
-                            .with_context(|| format!("Invalid CPU count: {}", value))?;
+                        cpus = value
+                            .parse()
+                            .with_context(|| format!("Invalid CPU count: {value}"))?;
                     }
                     "disk" => {
                         disk_size_gb = self.parse_disk_size(value)?;
@@ -68,7 +69,7 @@ impl VmManager {
                         timeout = self.parse_duration(value)?;
                     }
                     _ => {
-                        additional_args.push(format!("--{}", key));
+                        additional_args.push(format!("--{key}"));
                         additional_args.push(value.clone());
                     }
                 }
@@ -85,7 +86,10 @@ impl VmManager {
             network_config: NetworkConfig::default(),
         };
 
-        info!("VM configured: {:?} with {}MB RAM, {} CPUs", provider, memory_mb, cpus);
+        info!(
+            "VM configured: {:?} with {}MB RAM, {} CPUs",
+            provider, memory_mb, cpus
+        );
         self.configured_provider = provider;
         Ok(())
     }
@@ -93,7 +97,7 @@ impl VmManager {
     pub fn create_vm(&mut self) -> Result<VmInstance> {
         let vm_id = Uuid::new_v4().to_string();
         let vm_name = format!("isotope-vm-{}", &vm_id[..8]);
-        
+
         let instance = VmInstance::new(
             vm_id.clone(),
             vm_name,
@@ -102,23 +106,27 @@ impl VmManager {
         );
 
         self.instances.insert(vm_id.clone(), instance.clone());
-        
+
         info!("Created VM instance: {}", instance.name);
         Ok(instance)
     }
 
     pub async fn attach_iso(&mut self, instance: &VmInstance, iso_path: &Path) -> Result<()> {
-        info!("Attaching ISO {} to VM {}", iso_path.display(), instance.name);
+        info!(
+            "Attaching ISO {} to VM {}",
+            iso_path.display(),
+            instance.name
+        );
 
         if !iso_path.exists() {
             return Err(anyhow!("ISO file does not exist: {}", iso_path.display()));
         }
 
         let provider = self.get_provider(&instance.provider)?;
-        
+
         let mut updated_instance = instance.clone();
         provider.attach_iso(&mut updated_instance, iso_path).await?;
-        
+
         self.instances.insert(instance.id.clone(), updated_instance);
         Ok(())
     }
@@ -127,15 +135,19 @@ impl VmManager {
         info!("Starting VM: {}", instance.name);
 
         let provider = self.get_provider(&instance.provider)?;
-        
+
         let mut updated_instance = instance.clone();
-        
+
         // Create VM if not already created
-        provider.create_vm(&mut updated_instance).await
+        provider
+            .create_vm(&mut updated_instance)
+            .await
             .context("Failed to create VM")?;
-        
+
         // Start the VM
-        provider.start_vm(&mut updated_instance).await
+        provider
+            .start_vm(&mut updated_instance)
+            .await
             .context("Failed to start VM")?;
 
         self.instances.insert(instance.id.clone(), updated_instance);
@@ -144,12 +156,12 @@ impl VmManager {
 
     pub async fn wait_for_boot(&self, instance: &VmInstance) -> Result<()> {
         info!("Waiting for VM {} to boot", instance.name);
-        
+
         let provider = self.get_provider(&instance.provider)?;
-        
+
         // Wait for the boot-wait period first
         tokio::time::sleep(instance.config.boot_wait).await;
-        
+
         // Check if VM is still running
         if !provider.is_running(instance).await? {
             return Err(anyhow!("VM {} stopped during boot", instance.name));
@@ -161,23 +173,26 @@ impl VmManager {
 
     pub async fn wait_for_boot_test(&self, instance: &VmInstance) -> Result<()> {
         info!("Testing VM boot for instance: {}", instance.name);
-        
+
         let provider = self.get_provider(&instance.provider)?;
-        
+
         // Wait for the boot-wait period
         tokio::time::sleep(instance.config.boot_wait).await;
-        
+
         if provider.is_running(instance).await? {
             info!("VM boot test successful for: {}", instance.name);
             Ok(())
         } else {
-            Err(anyhow!("VM {} is not running after boot wait", instance.name))
+            Err(anyhow!(
+                "VM {} is not running after boot wait",
+                instance.name
+            ))
         }
     }
 
     pub async fn wait_for_shutdown(&self, instance: &VmInstance) -> Result<()> {
         info!("Waiting for VM {} to shutdown", instance.name);
-        
+
         let provider = self.get_provider(&instance.provider)?;
         provider.wait_for_shutdown(instance).await
     }
@@ -186,9 +201,11 @@ impl VmManager {
         info!("Shutting down VM: {}", instance.name);
 
         let provider = self.get_provider(&instance.provider)?;
-        
+
         let mut updated_instance = instance.clone();
-        provider.stop_vm(&mut updated_instance).await
+        provider
+            .stop_vm(&mut updated_instance)
+            .await
             .context("Failed to stop VM")?;
 
         self.instances.insert(instance.id.clone(), updated_instance);
@@ -199,7 +216,9 @@ impl VmManager {
         info!("Creating live snapshot for VM: {}", instance.name);
 
         let provider = self.get_provider(&instance.provider)?;
-        provider.create_snapshot(instance, "live-snapshot").await
+        provider
+            .create_snapshot(instance, "live-snapshot")
+            .await
             .context("Failed to create live snapshot")?;
 
         Ok(())
@@ -208,7 +227,7 @@ impl VmManager {
     pub fn get_live_snapshot_path(&self) -> Result<PathBuf> {
         // Return path to the live snapshot that can be converted to ISO
         let snapshot_path = self.working_dir.join("live-snapshot.qcow2");
-        
+
         if snapshot_path.exists() {
             Ok(snapshot_path)
         } else {
@@ -219,14 +238,15 @@ impl VmManager {
     pub fn get_or_create_configured_vm(&mut self) -> Result<VmInstance> {
         // Try to find an existing VM instance with the same configuration
         for instance in self.instances.values() {
-            if instance.provider == self.configured_provider 
+            if instance.provider == self.configured_provider
                 && instance.config.memory_mb == self.default_config.memory_mb
-                && instance.config.cpus == self.default_config.cpus {
+                && instance.config.cpus == self.default_config.cpus
+            {
                 info!("Reusing existing VM instance: {}", instance.name);
                 return Ok(instance.clone());
             }
         }
-        
+
         // If no existing VM found, create a new one
         info!("No compatible existing VM found, creating new instance");
         self.create_vm()
@@ -234,25 +254,25 @@ impl VmManager {
 
     pub async fn cleanup_all(&mut self) -> Result<()> {
         info!("Cleaning up all VM instances");
-        
+
         let instance_ids: Vec<String> = self.instances.keys().cloned().collect();
-        
+
         for instance_id in instance_ids {
             if let Some(instance) = self.instances.get(&instance_id) {
                 let provider = self.get_provider(&instance.provider)?;
-                
+
                 if instance.is_running() {
                     if let Err(e) = provider.stop_vm(&mut instance.clone()).await {
                         warn!("Failed to stop VM {}: {}", instance.name, e);
                     }
                 }
-                
+
                 if let Err(e) = provider.delete_vm(&mut instance.clone()).await {
                     warn!("Failed to delete VM {}: {}", instance.name, e);
                 }
             }
         }
-        
+
         self.instances.clear();
         Ok(())
     }
@@ -277,14 +297,20 @@ impl VmManager {
     }
 
     // Utility parsing methods
-    
+
     fn parse_memory_size(&self, size: &str) -> Result<u64> {
         let size_lower = size.to_lowercase();
         if size_lower.ends_with('g') || size_lower.ends_with("gb") {
-            let num: u64 = size_lower.trim_end_matches("gb").trim_end_matches('g').parse()?;
+            let num: u64 = size_lower
+                .trim_end_matches("gb")
+                .trim_end_matches('g')
+                .parse()?;
             Ok(num * 1024) // Convert GB to MB
         } else if size_lower.ends_with('m') || size_lower.ends_with("mb") {
-            let num: u64 = size_lower.trim_end_matches("mb").trim_end_matches('m').parse()?;
+            let num: u64 = size_lower
+                .trim_end_matches("mb")
+                .trim_end_matches('m')
+                .parse()?;
             Ok(num)
         } else {
             Err(anyhow!("Invalid memory size format: {}", size))
@@ -294,10 +320,16 @@ impl VmManager {
     fn parse_disk_size(&self, size: &str) -> Result<u64> {
         let size_lower = size.to_lowercase();
         if size_lower.ends_with('g') || size_lower.ends_with("gb") {
-            let num: u64 = size_lower.trim_end_matches("gb").trim_end_matches('g').parse()?;
+            let num: u64 = size_lower
+                .trim_end_matches("gb")
+                .trim_end_matches('g')
+                .parse()?;
             Ok(num)
         } else if size_lower.ends_with('t') || size_lower.ends_with("tb") {
-            let num: u64 = size_lower.trim_end_matches("tb").trim_end_matches('t').parse()?;
+            let num: u64 = size_lower
+                .trim_end_matches("tb")
+                .trim_end_matches('t')
+                .parse()?;
             Ok(num * 1024) // Convert TB to GB
         } else {
             Err(anyhow!("Invalid disk size format: {}", size))

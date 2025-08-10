@@ -1,11 +1,11 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use image::DynamicImage;
 use std::path::Path;
 use tracing::info;
-use image::DynamicImage;
 
-use crate::automation::vm::{VmInstance, VmState};
 use super::VmProviderTrait;
+use crate::automation::vm::{VmInstance, VmState};
 
 pub struct HyperVProvider;
 
@@ -50,12 +50,18 @@ impl VmProviderTrait for HyperVProvider {
     }
 
     async fn create_snapshot(&self, instance: &VmInstance, snapshot_name: &str) -> Result<()> {
-        info!("Creating Hyper-V snapshot: {} for VM: {}", snapshot_name, instance.name);
+        info!(
+            "Creating Hyper-V snapshot: {} for VM: {}",
+            snapshot_name, instance.name
+        );
         Err(anyhow!("Hyper-V provider not yet implemented"))
     }
 
     async fn restore_snapshot(&self, instance: &mut VmInstance, snapshot_name: &str) -> Result<()> {
-        info!("Restoring Hyper-V snapshot: {} for VM: {}", snapshot_name, instance.name);
+        info!(
+            "Restoring Hyper-V snapshot: {} for VM: {}",
+            snapshot_name, instance.name
+        );
         Err(anyhow!("Hyper-V provider not yet implemented"))
     }
 

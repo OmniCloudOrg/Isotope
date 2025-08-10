@@ -1,11 +1,11 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use image::DynamicImage;
 use std::path::Path;
 use tracing::info;
-use image::DynamicImage;
 
-use crate::automation::vm::{VmInstance, VmState};
 use super::VmProviderTrait;
+use crate::automation::vm::{VmInstance, VmState};
 
 pub struct VMwareProvider;
 
@@ -50,12 +50,18 @@ impl VmProviderTrait for VMwareProvider {
     }
 
     async fn create_snapshot(&self, instance: &VmInstance, snapshot_name: &str) -> Result<()> {
-        info!("Creating VMware snapshot: {} for VM: {}", snapshot_name, instance.name);
+        info!(
+            "Creating VMware snapshot: {} for VM: {}",
+            snapshot_name, instance.name
+        );
         Err(anyhow!("VMware provider not yet implemented"))
     }
 
     async fn restore_snapshot(&self, instance: &mut VmInstance, snapshot_name: &str) -> Result<()> {
-        info!("Restoring VMware snapshot: {} for VM: {}", snapshot_name, instance.name);
+        info!(
+            "Restoring VMware snapshot: {} for VM: {}",
+            snapshot_name, instance.name
+        );
         Err(anyhow!("VMware provider not yet implemented"))
     }
 

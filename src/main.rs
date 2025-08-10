@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use std::path::PathBuf;
 use tracing::{error, info};
 
+mod automation;
 mod cli;
 mod config;
 mod core;
 mod iso;
-mod automation;
 mod utils;
 
 use cli::Commands;
@@ -35,38 +35,42 @@ async fn main() -> Result<()> {
     // Initialize logging
     let log_level = if cli.verbose { "debug" } else { "info" };
     tracing_subscriber::fmt()
-        .with_env_filter(format!("isotope={},warn", log_level))
+        .with_env_filter(format!("isotope={log_level},warn"))
         .init();
 
     info!("Isotope v{} starting", env!("CARGO_PKG_VERSION"));
 
     let result = match cli.command {
-        Commands::Build { spec_file, output, continue_from } => {
+        Commands::Build {
+            spec_file,
+            output,
+            continue_from,
+        } => {
             info!("Building ISO from specification: {}", spec_file.display());
-            
+
             if let Some(step) = continue_from {
                 info!("Continuing from step {}", step);
             }
-            
+
             let spec = IsotopeSpec::from_file(&spec_file)
                 .with_context(|| format!("Failed to load spec file: {}", spec_file.display()))?;
-            
+
             let mut builder = Builder::new(spec);
             builder.set_spec_file_path(spec_file.clone());
-            
+
             if let Some(output_path) = output {
                 builder.set_output_path(output_path);
             }
-            
+
             if let Some(step) = continue_from {
                 builder.set_continue_from_step(step);
             }
-            
+
             builder.build().await
         }
         Commands::Validate { spec_file } => {
             info!("Validating specification: {}", spec_file.display());
-            
+
             match IsotopeSpec::from_file(&spec_file) {
                 Ok(spec) => {
                     info!("✓ Specification is valid");
@@ -80,16 +84,16 @@ async fn main() -> Result<()> {
         }
         Commands::Test { spec_file } => {
             info!("Testing specification: {}", spec_file.display());
-            
+
             let spec = IsotopeSpec::from_file(&spec_file)
                 .with_context(|| format!("Failed to load spec file: {}", spec_file.display()))?;
-            
+
             let builder = Builder::new(spec);
             builder.test().await
         }
         Commands::Convert { input, output } => {
             info!("Converting {} to Isotope format", input.display());
-            
+
             config::converter::convert_json_to_isotope(&input, &output)
                 .with_context(|| "Failed to convert configuration")
         }
