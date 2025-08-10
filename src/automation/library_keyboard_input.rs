@@ -193,7 +193,16 @@ impl LibraryBasedKeyboardMapper {
             "right" => vec!["e0", "4d", "e0", "cd"],
             "f1" => vec!["3b", "bb"],
             "f2" => vec!["3c", "bc"],
-            // Add more special keys as needed...
+            "f3" => vec!["3d", "bd"],
+            "f4" => vec!["3e", "be"],
+            "f5" => vec!["3f", "bf"],
+            "f6" => vec!["40", "c0"],
+            "f7" => vec!["41", "c1"],
+            "f8" => vec!["42", "c2"],
+            "f9" => vec!["43", "c3"],
+            "f10" => vec!["44", "c4"],
+            "f11" => vec!["57", "d7"],
+            "f12" => vec!["58", "d8"],
             _ => return Err(anyhow!("Unknown special key: {}", key)),
         };
 
