@@ -160,7 +160,7 @@ PRESS enter
 STAGE os_configure
 
 # Wait for shell prompt to be ready
-WAIT 5s
+WAIT 20s
 
 LOGIN ubuntu password=ubuntu host=127.0.0.1 port=20000
 
