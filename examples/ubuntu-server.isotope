@@ -193,7 +193,7 @@ RUN sudo -n systemctl start docker
 RUN sudo -n usermod -aG docker ubuntu
 
 # Install additional tools
-RUN sudo -n apt-get install -y curl wget git vim htop neofetch
+RUN sudo -n apt-get install -y btop
 
 # Copy custom configuration files
 COPY ./configs/docker-daemon.json /etc/docker/daemon.json

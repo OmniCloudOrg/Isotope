@@ -1,0 +1,222 @@
+# Ubuntu Server Live ISO with Docker
+FROM ./ubuntu-22.04.5-live-server-amd64.iso
+#CHECKSUM sha256:a4acfda10b18da50e2ec50ccaf860d7f20ce1ee42895e3840b57b2b371fc734
+
+LABEL name="ubuntu-docker-server"
+LABEL version="1.0.0"
+LABEL description="Ubuntu Server 22.04 with Docker pre-installed"
+
+# STAGE init - VM configuration for puppet automation
+STAGE init
+VM provider=virtualbox
+VM memory=4G
+VM cpus=2
+VM disk=20G
+VM boot-wait=10s
+VM timeout=30m
+
+# STAGE os_install - Automated OS installation keypresses
+STAGE os_install
+
+## Wait for Ubuntu Server to fully boot and show the installation menu
+# Use a more specific pattern to avoid matching boot log
+WAIT 2m FOR "Ubuntu Server"  # Looks for cursor movement + title, adjust as needed
+
+# Try to access boot menu or wait for automatic boot
+# If GRUB menu appears, select "Try or Install Ubuntu Server"
+PRESS enter
+WAIT 10s
+
+## Wait for the installer to fully load and show language selection
+# Look for a more unique phrase or full prompt
+WAIT 90s FOR "Welcome!"  # Use full prompt if possible
+
+# Language selection screen - usually defaults to English
+PRESS enter
+WAIT 5s
+
+# Installer update available
+WAIT 10s FOR "Installer update"  # Use full prompt if possible
+PRESS enter
+
+## Keyboard layout selection
+# Look for a more unique phrase or full prompt
+WAIT 10s FOR "keyboard layout below"  # Use full prompt if possible
+PRESS enter
+WAIT 3s
+
+# Choose they type of the installation
+WAIT 5s FOR "Choose the base for the installation"
+PRESS enter
+
+## Network configuration - wait for network detection
+# Look for a more unique phrase or full prompt
+
+WAIT 15s FOR "one interface this server can use"  # Use full prompt if possible
+# Usually auto-configured, just continue
+PRESS enter
+WAIT 10s
+
+## Proxy configuration - skip if no proxy
+# Look for a more unique phrase or full prompt
+WAIT 10s FOR "Proxy address"  # Use full prompt if possible
+PRESS enter
+WAIT 5s
+
+## Mirror configuration - use default Ubuntu mirrors
+# Look for a more unique phrase or full prompt
+WAIT 10s FOR "Mirror address"
+WAIT 20s FOR "location passed tests"
+PRESS enter
+WAIT 15s
+
+## Guided storage configuration - wait for disk detection
+# Look for a more unique phrase or full prompt
+WAIT 20s FOR "storage layout"  # Use full prompt if possible
+PRESS down
+PRESS down
+PRESS down
+PRESS down
+PRESS down
+# Use entire disk (usually default option)
+PRESS enter
+WAIT 1s
+# Confirm storage layout
+PRESS enter
+WAIT 1s
+PRESS down
+WAIT 1s
+PRESS enter
+
+## Profile setup - wait for user creation screen
+WAIT 15s FOR "Enter the username and password"
+TYPE ubuntu
+PRESS tab
+TYPE ubuntu-server
+PRESS tab  
+TYPE ubuntu
+PRESS tab
+TYPE ubuntu
+PRESS tab
+TYPE ubuntu
+PRESS tab
+PRESS enter
+WAIT 10s
+
+# ## Configure passwordless sudo for ubuntu user
+# # Open a root shell to configure sudo access
+# PRESS ctrl+alt+f2
+# WAIT 3s
+# # Login as root (installer environment)
+# TYPE root
+# PRESS enter
+# WAIT 2s
+# # Add ubuntu user to sudoers with NOPASSWD
+# TYPE "echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /target/etc/sudoers.d/ubuntu"
+# PRESS enter
+# WAIT 2s
+# # Set proper permissions for the sudoers file
+# TYPE "chmod 440 /target/etc/sudoers.d/ubuntu"
+# PRESS enter
+# WAIT 2s
+# # Return to installer
+# PRESS ctrl+alt+f1
+# WAIT 3s
+
+## Ubuntu pro
+PRESS enter
+
+## SSH setup
+# Look for a more unique phrase or full prompt
+WAIT 10s FOR "SSH configuration"  # Use full prompt if possible
+# Enable SSH server installation
+PRESS space
+WAIT 2s
+PRESS tab
+PRESS tab
+PRESS enter
+WAIT 10s
+
+## Server snaps - skip additional packages for now
+# Look for a more unique phrase or full prompt
+WAIT 10s FOR "Featured Server Snaps"  # Use full prompt if possible
+PRESS tab
+PRESS enter
+WAIT 5s
+
+## Wait for installation to complete - this takes a long time  
+# Ubuntu can show different completion messages, try common patterns
+WAIT 20m FOR "reboot now"  # More flexible pattern matching
+PRESS down
+PRESS down
+PRESS enter
+
+## Wait for reboot prompt
+# Look for a more unique phrase or full prompt
+WAIT 2m FOR "then press ENTER"  # Use full prompt if possible
+PRESS enter
+
+# STAGE os_configure - Live OS configuration
+STAGE os_configure
+
+# Wait for shell prompt to be ready
+WAIT 2m FOR "ubuntu-server"
+
+TYPE ubuntu
+PRESS enter
+TYPE ubuntu
+PRESS enter
+
+WAIT 2s
+
+TYPE "sudo mkdir -p /etc/sudoers.d"
+PRESS enter
+TYPE "ubuntu"
+PRESS enter
+WAIT 1s
+TYPE "echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/ubuntu"
+PRESS enter
+WAIT 1s
+TYPE "sudo chmod 440 /etc/sudoers.d/ubuntu"
+PRESS enter
+
+LOGIN ubuntu password=ubuntu
+
+# Update system packages
+RUN sudo -n apt-get update
+RUN sudo -n apt-get upgrade -y
+
+# Install Docker
+RUN sudo -n apt-get install -y docker.io
+RUN sudo -n systemctl enable docker
+RUN sudo -n systemctl start docker
+RUN sudo -n usermod -aG docker ubuntu
+
+# Install additional tools
+RUN sudo -n apt-get install -y btop
+
+# docker run a minecraft server in the background
+RUN sudo -n docker run -d -p 25565:25565 -e EULA=TRUE --name minecraft-server itzg/minecraft-server
+
+# Copy custom configuration files
+COPY ./configs/docker-daemon.json /etc/docker/daemon.json
+COPY ./scripts/startup.sh /usr/local/bin/startup.sh
+
+# Make startup script executable and enable
+RUN sudo -n chmod +x /usr/local/bin/startup.sh
+RUN sudo -n ln -s /usr/local/bin/startup.sh /etc/rc.local
+
+# Configure system settings
+RUN echo "export EDITOR=vim" | sudo -n tee -a /etc/profile
+RUN echo "alias ll='ls -la'" | sudo -n tee -a /etc/bash.bashrc
+
+# Configure Docker daemon
+RUN sudo -n systemctl restart docker
+RUN sudo -n systemctl status docker
+
+# STAGE pack - Create final bootable ISO
+STAGE pack
+EXPORT ./output/ubuntu-docker-server.iso
+FORMAT iso9660
+BOOTABLE true
+VOLUME_LABEL "Ubuntu Docker Server"
