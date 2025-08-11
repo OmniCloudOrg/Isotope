@@ -305,11 +305,12 @@ impl PuppetManager {
             Ok(_) => Ok(()),
             Err(e) => {
                 let ssh_info = if let Some(creds) = &self.ssh_credentials {
+                    // Get actual endpoint from provider to ensure accurate error reporting
+                    let provider = crate::automation::vm::providers::create_provider(&vm.provider);
+                    let (host, port) = provider.get_ssh_endpoint(vm);
                     format!(
                         "user='{}' host='{}' port='{}'",
-                        creds.username,
-                        vm.ssh_host().unwrap_or_else(|| "<unknown>".to_string()),
-                        vm.ssh_port().unwrap_or(22)
+                        creds.username, host, port
                     )
                 } else {
                     "<no ssh credentials configured>".to_string()
