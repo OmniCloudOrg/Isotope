@@ -20,7 +20,8 @@
       "Bash(VBoxManage.exe showvminfo:*)",
       "Bash(VBoxManage.exe controlvm:*)",
       "Bash(VBoxManage.exe createvm:*)",
-      "Bash(VBoxManage.exe modifyvm:*)"
+      "Bash(VBoxManage.exe modifyvm:*)",
+      "Bash(./target/debug/isotope.exe:*)"
     ],
     "deny": []
   }

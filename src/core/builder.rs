@@ -45,6 +45,24 @@ impl Builder {
         }
     }
 
+    pub fn new_with_ocr_debug(spec: IsotopeSpec, ocr_debug: bool) -> Self {
+        let working_dir = std::env::temp_dir().join(format!("isotope-{}", uuid::Uuid::new_v4()));
+
+        Self {
+            spec,
+            spec_file_path: None,
+            working_dir: working_dir.clone(),
+            output_path: None,
+            continue_from_step: None,
+            vm_manager: Arc::new(Mutex::new(VmManager::new())),
+            puppet_manager: Arc::new(Mutex::new(PuppetManager::new_with_ocr_debug(ocr_debug))),
+            iso_extractor: IsoExtractor::new(),
+            iso_packager: IsoPackager::new(),
+            fs_manager: FileSystemManager::new(working_dir),
+            checksum_verifier: ChecksumVerifier::new(),
+        }
+    }
+
     pub fn set_output_path(&mut self, path: PathBuf) {
         self.output_path = Some(path);
     }

@@ -92,8 +92,12 @@ impl VmProviderTrait for VirtualBoxProvider {
                 instance.config.network_config.ssh_port = actual_port;
                 info!("Found existing SSH port forwarding: {}", actual_port);
             } else {
-                // No port forwarding exists, find a free port and set it up
-                let ssh_host_port = net::find_free_port()
+                // No port forwarding exists, find a free port that's not used by other VMs
+                let used_ports = self.get_all_used_ssh_ports().await.unwrap_or_default();
+                if !used_ports.is_empty() {
+                    info!("Avoiding ports already in use by other VMs: {:?}", used_ports);
+                }
+                let ssh_host_port = net::find_free_port_with_exclusions(&used_ports)
                     .ok_or_else(|| anyhow!("No free port found for SSH forwarding"))?;
                 
                 info!("No SSH port forwarding found, setting up port forwarding to port {}", ssh_host_port);
@@ -198,9 +202,15 @@ impl VmProviderTrait for VirtualBoxProvider {
             ));
         }
 
-        // Find a random unoccupied port for SSH forwarding
-        let ssh_host_port = net::find_free_port()
+        // Find a random unoccupied port for SSH forwarding that's not used by other VMs
+        let used_ports = self.get_all_used_ssh_ports().await.unwrap_or_default();
+        if !used_ports.is_empty() {
+            info!("Avoiding ports already in use by other VMs: {:?}", used_ports);
+        }
+        let ssh_host_port = net::find_free_port_with_exclusions(&used_ports)
             .ok_or_else(|| anyhow!("No free port found for SSH forwarding"))?;
+        
+        info!("Selected SSH port {} for new VM {}", ssh_host_port, instance.name);
         // Store the port in the VM config for later use
         instance.config.network_config.ssh_port = ssh_host_port;
 
@@ -701,6 +711,39 @@ impl VmProviderTrait for VirtualBoxProvider {
 }
 
 impl VirtualBoxProvider {
+    /// Get all SSH ports currently forwarded by any VirtualBox VM
+    pub async fn get_all_used_ssh_ports(&self) -> Result<std::collections::HashSet<u16>> {
+        let mut used_ports = std::collections::HashSet::new();
+        
+        // Get list of all VMs
+        let output = self
+            .vboxmanage_cmd()
+            .args(["list", "vms"])
+            .output()
+            .context("Failed to list VirtualBox VMs")?;
+            
+        if !output.status.success() {
+            return Ok(used_ports);
+        }
+        
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        for line in output_str.lines() {
+            // Extract VM name from lines like "vm-name" {vm-id}
+            if let Some(start) = line.find('"') {
+                if let Some(end) = line[start + 1..].find('"') {
+                    let vm_name = &line[start + 1..start + 1 + end];
+                    
+                    // Get SSH port for this VM
+                    if let Ok(Some(port)) = self.get_ssh_port_from_vbox(vm_name).await {
+                        used_ports.insert(port);
+                    }
+                }
+            }
+        }
+        
+        Ok(used_ports)
+    }
+
     /// Get SSH port forwarding from VirtualBox VM configuration
     pub async fn get_ssh_port_from_vbox(&self, vm_name: &str) -> Result<Option<u16>> {
         let output = self

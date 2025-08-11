@@ -26,6 +26,10 @@ struct Cli {
 
     #[arg(short, long)]
     config: Option<PathBuf>,
+
+    /// Enable OCR debug messages during screen text detection
+    #[arg(long)]
+    ocr_debug: bool,
 }
 
 #[tokio::main]
@@ -55,7 +59,7 @@ async fn main() -> Result<()> {
             let spec = IsotopeSpec::from_file(&spec_file)
                 .with_context(|| format!("Failed to load spec file: {}", spec_file.display()))?;
 
-            let mut builder = Builder::new(spec);
+            let mut builder = Builder::new_with_ocr_debug(spec, cli.ocr_debug);
             builder.set_spec_file_path(spec_file.clone());
 
             if let Some(output_path) = output {
@@ -88,7 +92,7 @@ async fn main() -> Result<()> {
             let spec = IsotopeSpec::from_file(&spec_file)
                 .with_context(|| format!("Failed to load spec file: {}", spec_file.display()))?;
 
-            let builder = Builder::new(spec);
+            let builder = Builder::new_with_ocr_debug(spec, cli.ocr_debug);
             builder.test().await
         }
         Commands::Convert { input, output } => {

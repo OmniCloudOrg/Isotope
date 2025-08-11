@@ -29,10 +29,15 @@ pub struct PuppetManager {
     ssh_credentials: Option<SshCredentials>,
     debug_steps_dir: PathBuf,
     step_counter: usize,
+    ocr_debug_enabled: bool,
 }
 
 impl PuppetManager {
     pub fn new() -> Self {
+        Self::new_with_ocr_debug(false)
+    }
+
+    pub fn new_with_ocr_debug(ocr_debug_enabled: bool) -> Self {
         let debug_dir = std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
             .join("debug-steps");
@@ -50,6 +55,7 @@ impl PuppetManager {
             ssh_credentials: None,
             debug_steps_dir: debug_dir,
             step_counter: 0,
+            ocr_debug_enabled,
         }
     }
 
@@ -399,7 +405,7 @@ impl PuppetManager {
                     // Extract all text to see what OCR is finding
                     match self.ocr_engine.extract_text(&image).await {
                         Ok(extracted_text) => {
-                            if attempts <= 3 || attempts % 10 == 0 {
+                            if self.ocr_debug_enabled && (attempts <= 3 || attempts % 10 == 0) {
                                 trace!(
                                     "OCR extracted text (attempt {}): '{}'",
                                     attempts,
@@ -412,14 +418,16 @@ impl PuppetManager {
                                 .to_lowercase()
                                 .contains(&pattern.to_lowercase())
                             {
-                                trace!(
-                                    "Found screen text '{}' on VM {} (attempt {})",
-                                    pattern,
-                                    vm.name,
-                                    attempts
-                                );
+                                if self.ocr_debug_enabled {
+                                    trace!(
+                                        "Found screen text '{}' on VM {} (attempt {})",
+                                        pattern,
+                                        vm.name,
+                                        attempts
+                                    );
+                                }
                                 return Ok(());
-                            } else {
+                            } else if self.ocr_debug_enabled {
                                 trace!(
                                     "Pattern '{}' not found in extracted text (attempt {})",
                                     pattern,
