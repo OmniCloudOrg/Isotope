@@ -247,6 +247,20 @@ impl VmManager {
         }
     }
 
+    pub fn get_vm_disk_path(&self, instance: &VmInstance) -> Result<PathBuf> {
+        match instance.provider {
+            crate::automation::vm::VmProvider::VirtualBox => {
+                // VirtualBox creates disk files in current directory with VM name
+                let disk_path = PathBuf::from(format!("{}.vdi", instance.name));
+                if disk_path.exists() {
+                    Ok(disk_path)
+                } else {
+                    Err(anyhow!("VM disk not found: {}", disk_path.display()))
+                }
+            }
+        }
+    }
+
     pub fn get_or_create_configured_vm(&mut self) -> Result<VmInstance> {
         // Try to find an existing VM instance with the same configuration
         for instance in self.instances.values() {

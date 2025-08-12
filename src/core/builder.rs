@@ -241,10 +241,10 @@ impl Builder {
         let vm_instance = self.execute_os_install_stage(&source_iso_path).await?;
 
         // Step 4: Execute os_configure stage (live OS configuration)
-        self.execute_os_configure_stage(vm_instance).await?;
+        let final_vm_instance = self.execute_os_configure_stage(vm_instance).await?;
 
         // Step 5: Execute pack stage (create final ISO)
-        self.execute_pack_stage().await?;
+        self.execute_pack_stage(final_vm_instance).await?;
 
         // Cleanup
         self.cleanup().await?;
@@ -415,7 +415,7 @@ impl Builder {
         }
     }
 
-    async fn execute_os_configure_stage(&self, vm_instance: Option<VmInstance>) -> Result<()> {
+    async fn execute_os_configure_stage(&self, vm_instance: Option<VmInstance>) -> Result<Option<VmInstance>> {
         info!("Executing os_configure stage");
 
         if let Some(os_configure_stage) = self.spec.get_stage(&StageType::OsConfigure) {
@@ -490,7 +490,7 @@ impl Builder {
                             "Target step {} is in {:?} stage, skipping os_configure",
                             target_step, other_stage
                         );
-                        return Ok(()); // Skip this stage entirely
+                        return Ok(None); // Skip this stage entirely
                     }
                 }
             } else {
@@ -517,27 +517,45 @@ impl Builder {
                 .shutdown_vm(&vm_instance)
                 .await
                 .context("Failed to shutdown VM after configuration")?;
+
+            Ok(Some(vm_instance))
         } else {
             warn!("No os_configure stage found, skipping OS configuration");
+            Ok(vm_instance)
         }
-
-        Ok(())
     }
 
-    async fn execute_pack_stage(&self) -> Result<()> {
+    async fn execute_pack_stage(&self, vm_instance: Option<VmInstance>) -> Result<()> {
         info!("Executing pack stage");
 
         if let Some(pack_stage) = self.spec.get_stage(&StageType::Pack) {
-            // Extract the configured VM disk/snapshot into ISO format
             let vm_manager = self.vm_manager.lock().await;
-            let live_snapshot_path = vm_manager
-                .get_live_snapshot_path()
-                .context("No live snapshot available for packaging")?;
+            
+            // Try to get VM disk path or fallback to snapshot
+            let disk_path = if let Some(ref instance) = vm_instance {
+                match vm_manager.get_vm_disk_path(instance) {
+                    Ok(disk_path) => {
+                        info!("Using VM disk for packaging: {}", disk_path.display());
+                        disk_path
+                    }
+                    Err(e) => {
+                        warn!("Failed to get VM disk path: {}, trying snapshot", e);
+                        vm_manager
+                            .get_live_snapshot_path()
+                            .context("No VM disk or live snapshot available for packaging")?
+                    }
+                }
+            } else {
+                info!("No VM instance provided, trying to use live snapshot");
+                vm_manager
+                    .get_live_snapshot_path()
+                    .context("No VM disk or live snapshot available for packaging")?
+            };
 
-            // Convert snapshot to bootable ISO
+            // Convert disk/snapshot to bootable ISO
             let output_path = self.get_final_output_path(pack_stage)?;
             self.iso_packager
-                .create_live_iso(&live_snapshot_path, &output_path, pack_stage)
+                .create_live_iso(&disk_path, &output_path, pack_stage)
                 .context("Failed to create final ISO")?;
 
             info!("ISO created successfully: {}", output_path.display());

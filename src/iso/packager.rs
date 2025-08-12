@@ -23,29 +23,86 @@ impl IsoPackager {
         pack_stage: &Stage,
     ) -> Result<()> {
         info!(
-            "Creating live ISO from snapshot: {}",
+            "Creating bootable image from VM disk: {}",
             snapshot_path.display()
         );
 
-        // Create temporary working directory
-        std::fs::create_dir_all(&self.temp_dir)
-            .context("Failed to create ISO working directory")?;
+        // Check output format from pack stage
+        let mut format = "raw".to_string();
+        for instruction in &pack_stage.instructions {
+            if let Instruction::Format { format: fmt } = instruction {
+                format = fmt.clone();
+            }
+        }
 
-        // Extract VM snapshot/disk to filesystem
-        let extracted_fs_path = self.temp_dir.join("extracted_fs");
-        self.extract_vm_filesystem(snapshot_path, &extracted_fs_path)?;
+        // Create output directory if it doesn't exist
+        if let Some(parent) = output_path.parent() {
+            std::fs::create_dir_all(parent)
+                .context("Failed to create output directory")?;
+        }
 
-        // Prepare ISO filesystem structure
-        let iso_fs_path = self.temp_dir.join("iso_fs");
-        self.prepare_iso_filesystem(&extracted_fs_path, &iso_fs_path)?;
+        match format.as_str() {
+            "raw" | "img" => {
+                // Convert VM disk to raw IMG format using qemu-img
+                self.convert_to_raw_img(snapshot_path, output_path)?;
+            }
+            "iso9660" => {
+                warn!("ISO format requested, but creating raw IMG instead for better compatibility");
+                // Change extension to .img for raw format
+                let img_path = output_path.with_extension("img");
+                self.convert_to_raw_img(snapshot_path, &img_path)?;
+                info!("Created raw IMG instead of ISO for better VM compatibility: {}", img_path.display());
+            }
+            _ => {
+                warn!("Unsupported format '{}', defaulting to raw IMG", format);
+                let img_path = output_path.with_extension("img");
+                self.convert_to_raw_img(snapshot_path, &img_path)?;
+            }
+        }
 
-        // Make it bootable
-        self.make_bootable(&iso_fs_path)?;
+        info!("Bootable image created successfully: {}", output_path.display());
+        Ok(())
+    }
 
-        // Package into final ISO
-        self.package_final_iso(&iso_fs_path, output_path, pack_stage)?;
+    fn convert_to_raw_img(&self, source_path: &Path, output_path: &Path) -> Result<()> {
+        info!("Converting {} to raw IMG format", source_path.display());
 
-        info!("Live ISO created successfully: {}", output_path.display());
+        // Detect source format from extension
+        let source_format = match source_path.extension().and_then(|s| s.to_str()) {
+            Some("vdi") => "vdi",
+            Some("qcow2") => "qcow2",
+            Some("vmdk") => "vmdk",
+            Some("vhd") => "vhd",
+            _ => {
+                warn!("Unknown source format, letting qemu-img auto-detect");
+                "auto"
+            }
+        };
+
+        // Use qemu-img to convert to raw format
+        let mut cmd = Command::new("qemu-img");
+        cmd.args(["convert", "-O", "raw"]);
+        
+        if source_format != "auto" {
+            cmd.args(["-f", source_format]);
+        }
+        
+        cmd.args([
+            source_path.to_str().unwrap(),
+            output_path.to_str().unwrap(),
+        ]);
+
+        let output = cmd.output()
+            .context("Failed to execute qemu-img convert")?;
+
+        if !output.status.success() {
+            return Err(anyhow!(
+                "qemu-img convert failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        info!("Successfully converted to raw IMG: {}", output_path.display());
         Ok(())
     }
 
@@ -55,13 +112,19 @@ impl IsoPackager {
         std::fs::create_dir_all(output_path).context("Failed to create extraction directory")?;
 
         // Mount the VM disk image and extract its contents
-        if snapshot_path.extension().and_then(|s| s.to_str()) == Some("qcow2") {
-            self.extract_qcow2_filesystem(snapshot_path, output_path)?;
-        } else {
-            return Err(anyhow!(
-                "Unsupported disk format: {}",
-                snapshot_path.display()
-            ));
+        match snapshot_path.extension().and_then(|s| s.to_str()) {
+            Some("qcow2") => {
+                self.extract_qcow2_filesystem(snapshot_path, output_path)?;
+            }
+            Some("vdi") => {
+                self.extract_vdi_filesystem(snapshot_path, output_path)?;
+            }
+            _ => {
+                return Err(anyhow!(
+                    "Unsupported disk format: {}. Supported formats: qcow2, vdi",
+                    snapshot_path.display()
+                ));
+            }
         }
 
         Ok(())
@@ -84,6 +147,45 @@ impl IsoPackager {
             ])
             .output()
             .context("Failed to convert QCOW2 to raw")?;
+
+        if !output.status.success() {
+            return Err(anyhow!(
+                "QEMU convert failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        // Mount the raw disk image
+        #[cfg(unix)]
+        {
+            self.mount_raw_disk_unix(&raw_path, output_path)?;
+        }
+
+        #[cfg(windows)]
+        {
+            self.mount_raw_disk_windows(&raw_path, output_path)?;
+        }
+
+        Ok(())
+    }
+
+    fn extract_vdi_filesystem(&self, vdi_path: &Path, output_path: &Path) -> Result<()> {
+        info!("Extracting VDI filesystem");
+
+        // Convert VDI to raw image using qemu-img (supports VDI format)
+        let raw_path = self.temp_dir.join("disk.raw");
+        let output = Command::new("qemu-img")
+            .args([
+                "convert",
+                "-f",
+                "vdi",
+                "-O",
+                "raw",
+                vdi_path.to_str().unwrap(),
+                raw_path.to_str().unwrap(),
+            ])
+            .output()
+            .context("Failed to convert VDI to raw")?;
 
         if !output.status.success() {
             return Err(anyhow!(
