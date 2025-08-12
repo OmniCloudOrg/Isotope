@@ -198,22 +198,6 @@ RUN sudo -n apt-get install -y btop
 # docker run a minecraft server in the background
 RUN sudo -n docker run -d -p 25565:25565 -e EULA=TRUE --name minecraft-server itzg/minecraft-server
 
-# Copy custom configuration files
-COPY ./configs/docker-daemon.json /etc/docker/daemon.json
-COPY ./scripts/startup.sh /usr/local/bin/startup.sh
-
-# Make startup script executable and enable
-RUN sudo -n chmod +x /usr/local/bin/startup.sh
-RUN sudo -n ln -s /usr/local/bin/startup.sh /etc/rc.local
-
-# Configure system settings
-RUN echo "export EDITOR=vim" | sudo -n tee -a /etc/profile
-RUN echo "alias ll='ls -la'" | sudo -n tee -a /etc/bash.bashrc
-
-# Configure Docker daemon
-RUN sudo -n systemctl restart docker
-RUN sudo -n systemctl status docker
-
 # STAGE pack - Create final bootable ISO
 STAGE pack
 EXPORT ./output/ubuntu-docker-server.iso
