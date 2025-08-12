@@ -47,8 +47,8 @@ fn validate_init_stage(stage: &Stage) -> Result<()> {
                 match key.as_str() {
                     "provider" => {
                         has_vm_provider = true;
-                        if !["qemu", "virtualbox", "vmware", "hyperv"].contains(&value.as_str()) {
-                            return Err(anyhow!("Invalid VM provider: {}. Supported: qemu, virtualbox, vmware, hyperv", value));
+                        if value.as_str().to_lowercase() != "virtualbox" {
+                            return Err(anyhow!("Invalid VM provider: {}. Only VirtualBox is supported.", value));
                         }
                     }
                     "memory" => {

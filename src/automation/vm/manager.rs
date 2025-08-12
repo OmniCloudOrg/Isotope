@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::utils::vm_metadata::VmMetadata;
 use anyhow::{anyhow, Context, Result};
 use std::collections::HashMap;
@@ -7,7 +9,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use super::providers::{create_provider, VmProviderTrait};
-use super::{NetworkConfig, VmConfig, VmInstance, VmProvider, VmState};
+use super::{NetworkConfig, VmConfig, VmInstance, VmProvider};
 use crate::config::{Instruction, Stage};
 
 pub struct VmManager {

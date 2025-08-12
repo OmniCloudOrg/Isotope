@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use anyhow::{anyhow, Context, Result};
 use ssh2::Session;
 use std::collections::HashMap;

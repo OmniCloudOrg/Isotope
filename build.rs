@@ -50,19 +50,6 @@ fn setup_windows_build() {
         );
     }
 
-    // Check for Hyper-V (requires admin privileges to query)
-    let has_hyperv = Command::new("powershell")
-        .arg("-Command")
-        .arg("(Get-WindowsOptionalFeature -FeatureName Microsoft-Hyper-V-All -Online).State -eq 'Enabled'")
-        .output()
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim() == "True")
-        .unwrap_or(false);
-
-    if has_hyperv {
-        println!("cargo:rustc-cfg=feature=\"hyperv\"");
-    } else {
-        println!("cargo:warning=Hyper-V not detected or not enabled. Hyper-V-specific features will be disabled.");
-    }
 
     // Check for 7-Zip
     let seven_zip_paths = [
@@ -95,18 +82,6 @@ fn setup_unix_build() {
         println!("cargo:warning=xorriso not found. ISO creation/extraction may not work properly.");
     }
 
-    // Check for QEMU
-    let has_qemu = Command::new("which")
-        .arg("qemu-system-x86_64")
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false);
-
-    if has_qemu {
-        println!("cargo:rustc-cfg=feature=\"qemu\"");
-    } else {
-        println!("cargo:warning=QEMU not found. QEMU-specific features will be disabled.");
-    }
 
     // Check for VirtualBox on Unix
     let has_virtualbox = Command::new("which")
@@ -128,7 +103,6 @@ fn setup_unix_build() {
     let mut config_content = String::new();
 
     config_content.push_str(&format!("pub const HAS_XORRISO: bool = {};\n", has_xorriso));
-    config_content.push_str(&format!("pub const HAS_QEMU: bool = {};\n", has_qemu));
     config_content.push_str(&format!(
         "pub const HAS_VIRTUALBOX: bool = {};\n",
         has_virtualbox
