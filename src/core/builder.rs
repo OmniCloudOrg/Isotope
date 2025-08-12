@@ -552,13 +552,13 @@ impl Builder {
                     .context("No VM disk or live snapshot available for packaging")?
             };
 
-            // Convert disk/snapshot to bootable ISO
+            // Convert VDI disk to bootable IMG
             let output_path = self.get_final_output_path(pack_stage)?;
             self.iso_packager
-                .create_live_iso(&disk_path, &output_path, pack_stage)
-                .context("Failed to create final ISO")?;
+                .create_bootable_image(&disk_path, &output_path, pack_stage)
+                .context("Failed to create bootable IMG")?;
 
-            info!("ISO created successfully: {}", output_path.display());
+            info!("Bootable IMG created successfully: {}", output_path.display());
         } else {
             return Err(anyhow::anyhow!("pack stage is required but not found"));
         }
