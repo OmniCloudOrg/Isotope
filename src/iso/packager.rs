@@ -67,43 +67,24 @@ impl IsoPackager {
     fn convert_to_raw_img(&self, source_path: &Path, output_path: &Path) -> Result<()> {
         info!("Converting {} to raw IMG format", source_path.display());
 
-        // Detect source format from extension
+        // We only support VDI files from VirtualBox
         let source_format = source_path.extension().and_then(|s| s.to_str()).unwrap_or("unknown");
 
-        match source_format {
-            "vdi" => {
-                // Use VirtualBox VBoxManage to convert VDI to raw
-                self.convert_vdi_to_raw(source_path, output_path)?;
-            }
-            "qcow2" | "vmdk" | "vhd" => {
-                // Try qemu-img for other formats, fallback if not available
-                if let Err(e) = self.convert_with_qemu_img(source_path, output_path, source_format) {
-                    warn!("qemu-img not available ({}), trying direct copy for format {}", e, source_format);
-                    // For now, just copy the file - many VM providers can boot various formats directly
-                    std::fs::copy(source_path, output_path)
-                        .context("Failed to copy disk file")?;
-                    warn!("Copied {} file directly - may need conversion for some VM providers", source_format);
-                }
-            }
-            _ => {
-                warn!("Unknown source format '{}', copying file directly", source_format);
-                std::fs::copy(source_path, output_path)
-                    .context("Failed to copy disk file")?;
-            }
+        if source_format != "vdi" {
+            return Err(anyhow!(
+                "Unsupported disk format: {}. Only VDI files from VirtualBox are supported.",
+                source_format
+            ));
         }
 
-        info!("Successfully processed disk to: {}", output_path.display());
-        Ok(())
-    }
-
-    fn convert_vdi_to_raw(&self, vdi_path: &Path, output_path: &Path) -> Result<()> {
+        // Use VirtualBox VBoxManage to convert VDI to raw
         info!("Converting VDI to raw using VBoxManage");
 
         let output = Command::new("VBoxManage")
             .args([
                 "clonemedium",
                 "disk",
-                vdi_path.to_str().unwrap(),
+                source_path.to_str().unwrap(),
                 output_path.to_str().unwrap(),
                 "--format",
                 "RAW",
@@ -119,28 +100,6 @@ impl IsoPackager {
         }
 
         info!("Successfully converted VDI to raw IMG using VBoxManage");
-        Ok(())
-    }
-
-    fn convert_with_qemu_img(&self, source_path: &Path, output_path: &Path, source_format: &str) -> Result<()> {
-        let output = Command::new("qemu-img")
-            .args([
-                "convert",
-                "-f", source_format,
-                "-O", "raw",
-                source_path.to_str().unwrap(),
-                output_path.to_str().unwrap(),
-            ])
-            .output()
-            .context("Failed to execute qemu-img convert")?;
-
-        if !output.status.success() {
-            return Err(anyhow!(
-                "qemu-img convert failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
         Ok(())
     }
 
